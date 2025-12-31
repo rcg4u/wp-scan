@@ -73,6 +73,7 @@ Environment variables for email:
 - `--curl` / `--no-curl`
 - `--wpver` / `--no-wpver`
 - `--perms` / `--no-perms`
+- `--verification` / `--no-verification`
 
 Modules: `recent`, `suspicious`, `uploads`, `uploads-php`, `backdoor`, `obfuscation`, `phpshell`, `hidden`, `superglobal`, `curl`, `wpver`, `perms`, `all`
 
@@ -91,6 +92,7 @@ Run with `--menu` and enter selections like `1,3,8`:
 9) Uploads PHP
 10) Hidden dotfiles
 11) Superglobal backdoors
+12) Verification files (.well-known & top-level)
 
 ### JSON output
 

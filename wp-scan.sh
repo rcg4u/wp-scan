@@ -33,6 +33,7 @@
 #   --curl / --no-curl
 #   --wpver / --no-wpver
 #   --perms / --no-perms
+#   --verification / --no-verification
 #   --help                   Show usage
 #
 # Modules: recent, suspicious, uploads, backdoor, obfuscation, phpshell, curl, wpver, perms, all
@@ -77,11 +78,12 @@ DO_SUPERGLOBAL=1
 DO_CURL=1
 DO_WPVER=1
 DO_PERMS=1
+DO_VERIFICATION=1
 
 MENU_MODE=0
 
 enable_only_defaults() {
-    DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0
+    DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_VERIFICATION=0
 }
 
 set_module_flag() {
@@ -93,8 +95,9 @@ set_module_flag() {
         obfuscation) DO_OBFUSCATED=1 ;;
         curl) DO_CURL=1 ;;
         wpver) DO_WPVER=1 ;;
-        perms) DO_PERMS=1 ;;
-        all) DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_UPLOADS_PHP=1; DO_BACKDOOR=1; DO_OBFUSCATED=1; DO_PHPSHELL=1; DO_HIDDEN=1; DO_SUPERGLOBAL=1; DO_CURL=1; DO_WPVER=1; DO_PERMS=1 ;;
+    perms) DO_PERMS=1 ;;
+    verification) DO_VERIFICATION=1 ;;
+    all) DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_UPLOADS_PHP=1; DO_BACKDOOR=1; DO_OBFUSCATED=1; DO_PHPSHELL=1; DO_HIDDEN=1; DO_SUPERGLOBAL=1; DO_CURL=1; DO_WPVER=1; DO_PERMS=1; DO_VERIFICATION=1 ;;
     esac
 }
 
@@ -107,8 +110,9 @@ clear_module_flag() {
         obfuscation) DO_OBFUSCATED=0 ;;
         curl) DO_CURL=0 ;;
         wpver) DO_WPVER=0 ;;
-        perms) DO_PERMS=0 ;;
-        all) DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0 ;;
+    perms) DO_PERMS=0 ;;
+    verification) DO_VERIFICATION=0 ;;
+    all) DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_VERIFICATION=0 ;;
     esac
 }
 
@@ -195,12 +199,16 @@ while [ $# -gt 0 ]; do
             set_module_flag perms; shift ;;
         --no-perms)
             clear_module_flag perms; shift ;;
+        --verification)
+            set_module_flag verification; shift ;;
+        --no-verification)
+            clear_module_flag verification; shift ;;
         -h|--help)
             echo "Usage: $0 [options] /path/to/site/root"
             echo
             echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --only <modules> --skip <modules> --no-wordpress --sc --json --exit-code <binary|count> --zip <filename.zip> --with-cache --scan-all"
-            echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --uploads-php/--no-uploads-php --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --hidden/--no-hidden --superglobal/--no-superglobal --curl/--no-curl --wpver/--no-wpver --perms/--no-perms"
-            echo "Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, hidden, superglobal, curl, wpver, perms, all"
+            echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --uploads-php/--no-uploads-php --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --hidden/--no-hidden --superglobal/--no-superglobal --curl/--no-curl --wpver/--no-wpver --perms/--no-perms --verification/--no-verification"
+            echo "Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, hidden, superglobal, curl, wpver, perms, verification, all"
             echo
             echo "Examples:"
             echo "  $0 --only recent,uploads --email admin@example.com /var/www/html/site"
@@ -260,6 +268,7 @@ if [ "$MENU_MODE" -eq 1 ]; then
     echo "  9) PHP files inside uploads"
     echo " 10) Hidden dotfiles"
     echo " 11) Superglobal backdoor patterns"
+    echo " 12) Verification files (.well-known & top-level)"
     echo "Select modules to run (e.g., 1,3,8) or press Enter for default (all):"
     read -r USER_SEL
     if [ -n "$USER_SEL" ]; then
@@ -277,6 +286,7 @@ if [ "$MENU_MODE" -eq 1 ]; then
                 9) DO_UPLOADS_PHP=1 ;;
                10) DO_HIDDEN=1 ;;
                11) DO_SUPERGLOBAL=1 ;;
+               12) DO_VERIFICATION=1 ;;
             esac
         done
     fi
@@ -370,11 +380,15 @@ fi
 
 # Check for any verification files (Google, Bing, Yandex, etc.)
 # Fixed logic: search top-level verification HTML files and any files under .well-known
-VERIFICATION_FILES=$( { find "$SITE_PATH" -maxdepth 1 -type f \( -name "google*.html" -o -name "bing*.html" -o -name "yandex*.html" \) 2>/dev/null ; find "$SITE_PATH/.well-known" -type f 2>/dev/null ; } 2>/dev/null )
-if [ -n "$VERIFICATION_FILES" ]; then
-    echo "!!! WARNING: Found verification files. These could be for unauthorized ownership claims:"
-    echo "$VERIFICATION_FILES"
-    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$VERIFICATION_FILES")
+if [ "$DO_VERIFICATION" -eq 1 ]; then
+    VERIFICATION_FILES=$( { find "$SITE_PATH" -maxdepth 1 -type f \( -name "google*.html" -o -name "bing*.html" -o -name "yandex*.html" \) 2>/dev/null ; find "$SITE_PATH/.well-known" -type f 2>/dev/null ; } 2>/dev/null )
+    if [ -n "$VERIFICATION_FILES" ]; then
+        echo "!!! WARNING: Found verification files. These could be for unauthorized ownership claims:"
+        echo "$VERIFICATION_FILES"
+        ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$VERIFICATION_FILES")
+    else
+        echo "OK: No verification files found."
+    fi
 fi
 
 
