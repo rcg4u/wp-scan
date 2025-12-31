@@ -89,6 +89,16 @@ RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 2>/dev/null)
 if [ -n "$RECENT_FILES" ]; then
     echo "!!! WARNING: Recently modified files found. Please review them:"
     echo "$RECENT_FILES"
+    echo -e "\n[+] Showing head -10 and tail -10 for each modified file:"
+    printf "%s\n" "$RECENT_FILES" | while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        echo "----- $f -----"
+        echo "-- head -10 --"
+        head -n 10 "$f" 2>/dev/null || echo "(unable to read)"
+        echo "-- tail -10 --"
+        tail -n 10 "$f" 2>/dev/null || echo "(unable to read)"
+        echo "--------------"
+    done
 else
     echo "OK: No recently modified files found."
 fi
@@ -107,11 +117,16 @@ done
 # Check for non-standard directories in uploads (e.g., month > 12)
 UPLOADS_DIR="$SITE_PATH/wp-content/uploads"
 if [ -d "$UPLOADS_DIR" ]; then
-    # Find directories in uploads with a numeric name that is not 01-12
-    FAKE_MONTHS=$(find "$UPLOADS_DIR" -maxdepth 2 -type d -name "[0-9]*" | awk -F'/' '{print $NF}' | grep -vxE '^^[0-9]{1,2}$' | grep -vxE '0[1-9]|1[0-2]')
-    if [ -n "$FAKE_MONTHS" ]; then
+    # Find directories in uploads with a numeric basename that is not a valid month (01-12)
+    FAKE_MONTH_DIRS=$(find "$UPLOADS_DIR" -maxdepth 2 -type d -name "[0-9]*" -print 2>/dev/null | while read -r DIR; do
+        BASENAME=$(basename "$DIR")
+        if [[ "$BASENAME" =~ ^[0-9]+$ ]] && ! [[ "$BASENAME" =~ ^0[1-9]$|^1[0-2]$ ]]; then
+            echo "$DIR"
+        fi
+    done)
+    if [ -n "$FAKE_MONTH_DIRS" ]; then
         echo "!!! WARNING: Found non-month directories in uploads (possible backdoors):"
-        echo "$FAKE_MONTHS"
+        echo "$FAKE_MONTH_DIRS"
     fi
 fi
 
