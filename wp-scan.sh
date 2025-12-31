@@ -89,16 +89,6 @@ RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 2>/dev/null)
 if [ -n "$RECENT_FILES" ]; then
     echo "!!! WARNING: Recently modified files found. Please review them:"
     echo "$RECENT_FILES"
-    echo -e "\n[+] Showing head -10 and tail -10 for each modified file:"
-    printf "%s\n" "$RECENT_FILES" | while IFS= read -r f; do
-        [ -z "$f" ] && continue
-        echo "----- $f -----"
-        echo "-- head -10 --"
-        head -n 10 "$f" 2>/dev/null || echo "(unable to read)"
-        echo "-- tail -10 --"
-        tail -n 10 "$f" 2>/dev/null || echo "(unable to read)"
-        echo "--------------"
-    done
 else
     echo "OK: No recently modified files found."
 fi
