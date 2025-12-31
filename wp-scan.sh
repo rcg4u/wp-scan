@@ -22,6 +22,9 @@ ARG_SITE=""
 # WordPress mode (default on). Disable with --no-wordpress
 WP_MODE=1
 
+# Show context toggle (2 lines before/after around matched signatures)
+SHOW_CONTEXT=0
+
 # Module toggles (default: run all)
 DO_RECENT=1
 DO_SUSPICIOUS=1
@@ -89,6 +92,8 @@ while [ $# -gt 0 ]; do
             shift 2 ;;
         --no-wordpress)
             WP_MODE=0; shift ;;
+        --sc)
+            SHOW_CONTEXT=1; shift ;;
         -h|--help)
             echo "Usage: $0 [--email <addr>] [--email-always] [--email-from <addr>] [--email-subject <text>] /path/to/wordpress/root"
             exit 0 ;;
@@ -242,10 +247,20 @@ fi
 # Search for common backdoor functions
 if [ "$DO_BACKDOOR" -eq 1 ]; then
     echo "  -> Searching for high-risk backdoor functions..."
-    BACKDOOR_MATCH=$(grep -R -l -i --include="*.php" -e "eval\s*(" -e "base64_decode\s*(" -e "shell_exec\s*(" -e "passthru\s*(" -e "system\s*(" -e "exec\s*(" "$SITE_PATH" 2>/dev/null)
+    BACKDOOR_PATTERN="eval\\s*\(|base64_decode\\s*\(|shell_exec\\s*\(|passthru\\s*\(|system\\s*\(|exec\\s*\("
+    BACKDOOR_MATCH=$(grep -R -l -i --include="*.php" -E "$BACKDOOR_PATTERN" "$SITE_PATH" 2>/dev/null)
     if [ -n "$BACKDOOR_MATCH" ]; then
         echo "!!! WARNING: Found high-risk functions. Review these files:"
-        echo "$BACKDOOR_MATCH" | grep -v -E "wp-includes/|wp-admin/|wp-content/plugins/|wp-content/themes/" | head -10
+        FILTERED_BACKDOOR=$(echo "$BACKDOOR_MATCH" | grep -v -E "wp-includes/|wp-admin/|wp-content/plugins/|wp-content/themes/" | head -10)
+        echo "$FILTERED_BACKDOOR"
+        if [ "$SHOW_CONTEXT" -eq 1 ]; then
+            echo "  -> Showing 2 lines of context for backdoor signatures (first 3 matches per file):"
+            printf "%s\n" "$FILTERED_BACKDOOR" | while IFS= read -r f; do
+                [ -z "$f" ] && continue
+                echo "----- $f -----"
+                grep -n -I -E "$BACKDOOR_PATTERN" -C 2 -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+            done
+        fi
     else
         echo "OK: No high-risk functions found in non-standard locations."
     fi
@@ -254,10 +269,20 @@ fi
 # Search for obfuscated code patterns
 if [ "$DO_OBFUSCATED" -eq 1 ]; then
     echo "  -> Searching for obfuscated code (base64, gzinflate, str_rot13)..."
-    OBFUSCATED_MATCH=$(grep -R -l -i --include="*.php" -e "base64_decode" -e "gzinflate(" -e "str_rot13(" -e "strrev(" "$SITE_PATH" 2>/dev/null)
+    OBFUSCATED_PATTERN="base64_decode|gzinflate\(|str_rot13\(|strrev\("
+    OBFUSCATED_MATCH=$(grep -R -l -i --include="*.php" -E "$OBFUSCATED_PATTERN" "$SITE_PATH" 2>/dev/null)
     if [ -n "$OBFUSCATED_MATCH" ]; then
         echo "!!! WARNING: Found potentially obfuscated code. Review these files:"
-        echo "$OBFUSCATED_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -10
+        FILTERED_OBFUSCATED=$(echo "$OBFUSCATED_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -10)
+        echo "$FILTERED_OBFUSCATED"
+        if [ "$SHOW_CONTEXT" -eq 1 ]; then
+            echo "  -> Showing 2 lines of context for obfuscation signatures (first 3 matches per file):"
+            printf "%s\n" "$FILTERED_OBFUSCATED" | while IFS= read -r f; do
+                [ -z "$f" ] && continue
+                echo "----- $f -----"
+                grep -n -I -E "$OBFUSCATED_PATTERN" -C 2 -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+            done
+        fi
     else
         echo "OK: No obvious obfuscated code found."
     fi
@@ -275,6 +300,19 @@ if [ "$DO_PHPSHELL" -eq 1 ]; then
         echo "!!! WARNING: Potential PHP shell indicators found. Review these files:"
         PHPSHELL_UNIQUE=$( { echo "$PHPSHELL_MATCH"; echo "$PHPSHELL_NAMES"; } | grep -v -E "wp-includes/|wp-admin/" | sort -u )
         echo "$PHPSHELL_UNIQUE" | head -20
+
+        if [ "$SHOW_CONTEXT" -eq 1 ]; then
+            echo "  -> Showing 2 lines of context around signature matches (first 3 matches per file):"
+            printf "%s\n" "$PHPSHELL_UNIQUE" | head -20 | while IFS= read -r f; do
+                [ -z "$f" ] && continue
+                echo "----- $f -----"
+                if grep -q -I -E "$PHPSHELL_SIG_PATTERN" "$f" 2>/dev/null; then
+                    grep -n -I -E "$PHPSHELL_SIG_PATTERN" -C 2 -m 3 "$f" 2>/dev/null
+                else
+                    echo "(flagged by filename; no signature lines found)"
+                fi
+            done
+        fi
     else
         echo "OK: No explicit PHP shell signatures found."
     fi
