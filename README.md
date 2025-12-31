@@ -50,6 +50,7 @@ If no arguments are provided, usage is shown.
 - `--sc`: show 2 lines of code context around matched signatures
 - `--json`: output a minimal JSON summary of counts by module and overall status
 - `--exit-code <binary|count>`: exit 0/1 in binary mode or return the warning count (capped to 254)
+- `--with-cache`: include `wp-content/cache` in the recent files scan (excluded by default)
 - `--no-cache`: exclude `wp-content/cache` from the recent files scan (cache changes are noisy)
 
 Environment variables for email:
@@ -137,8 +138,8 @@ bash wp-scan.sh --menu /var/www/html/wordpress
 # Email when warnings are found
 bash wp-scan.sh --email security@example.com /var/www/html/site
 
-# Ignore cache changes in recent file scan
-bash wp-scan.sh --no-cache /var/www/html/site
+# Include cache changes in recent file scan (default excludes cache)
+bash wp-scan.sh --with-cache /var/www/html/site
 ```
 
 ## Notes

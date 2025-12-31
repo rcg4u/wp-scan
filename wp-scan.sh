@@ -56,6 +56,7 @@ WP_MODE=1
 SHOW_CONTEXT=0
 JSON_OUTPUT=0
 EXIT_CODE_MODE="binary"
+EXCLUDE_CACHE=1
 
 # Module toggles (default: run all)
 DO_RECENT=1
@@ -134,6 +135,8 @@ while [ $# -gt 0 ]; do
             JSON_OUTPUT=1; shift ;;
         --exit-code)
             EXIT_CODE_MODE="$2"; shift 2 ;;
+        --with-cache)
+            EXCLUDE_CACHE=0; shift ;;
         --recent)
             set_module_flag recent; shift ;;
         --no-recent)
@@ -185,7 +188,7 @@ while [ $# -gt 0 ]; do
         -h|--help)
             echo "Usage: $0 [options] /path/to/site/root"
             echo
-            echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --only <modules> --skip <modules> --no-wordpress --sc --json --exit-code <binary|count>"
+            echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --only <modules> --skip <modules> --no-wordpress --sc --json --exit-code <binary|count> --with-cache"
             echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --uploads-php/--no-uploads-php --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --hidden/--no-hidden --superglobal/--no-superglobal --curl/--no-curl --wpver/--no-wpver --perms/--no-perms"
             echo "Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, hidden, superglobal, curl, wpver, perms, all"
             echo
@@ -296,7 +299,11 @@ fi
 # --- 1. Check for Recently Modified Files ---
 if [ "$DO_RECENT" -eq 1 ]; then
     echo -e "\n[+] Checking for recently modified files (any type) in the last 60 minutes..."
-    RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 2>/dev/null)
+    if [ "$EXCLUDE_CACHE" -eq 1 ]; then
+        RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 -not -path "*/wp-content/cache/*" 2>/dev/null)
+    else
+        RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 2>/dev/null)
+    fi
     if [ -n "$RECENT_FILES" ]; then
         echo "!!! WARNING: Recently modified files found. Please review them:"
         echo "$RECENT_FILES"
