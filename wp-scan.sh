@@ -3,8 +3,33 @@
 # ====================================================================
 # Generic WordPress Security Scanner
 #
-# Usage: ./generic_wp_scan.sh [--email <addr>] [--email-always] [--email-from <addr>] [--email-subject <text>] /path/to/wordpress/root
-# Example: ./generic_wp_scan.sh --email admin@example.com /var/www/html/wordpress
+# Usage: ./generic_wp_scan.sh [options] /path/to/site/root
+#
+# Options:
+#   --email <addr>           Send report to this address when warnings found
+#   --email-always           Always send email even when no warnings
+#   --email-from <addr>      Sender address (sendmail/msmtp)
+#   --email-subject <text>   Base subject; status appended
+#   --menu                   Interactive menu to select scan modules
+#   --only <modules>         Run only these modules (csv or space-separated)
+#   --skip <modules>         Skip these modules (csv or space-separated)
+#   --no-wordpress           Scan generic site; skip WordPress-specific checks
+#   --sc                     Show 2 lines of code context around matched signatures
+#
+# Module Triggers (enable/disable individually):
+#   --recent / --no-recent
+#   --suspicious / --no-suspicious
+#   --uploads / --no-uploads
+#   --backdoor / --no-backdoor
+#   --obfuscation / --no-obfuscation
+#   --phpshell / --no-phpshell
+#   --curl / --no-curl
+#   --wpver / --no-wpver
+#   --perms / --no-perms
+#   --help                   Show usage
+#
+# Modules: recent, suspicious, uploads, backdoor, obfuscation, phpshell, curl, wpver, perms, all
+# Example: ./generic_wp_scan.sh --only recent,uploads --email admin@example.com /var/www/html/site
 # ====================================================================
 
 # --- Script Logic ---
@@ -131,7 +156,16 @@ while [ $# -gt 0 ]; do
         --no-perms)
             clear_module_flag perms; shift ;;
         -h|--help)
-            echo "Usage: $0 [--email <addr>] [--email-always] [--email-from <addr>] [--email-subject <text>] /path/to/wordpress/root"
+            echo "Usage: $0 [options] /path/to/site/root"
+            echo
+            echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --only <modules> --skip <modules> --no-wordpress --sc"
+            echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --curl/--no-curl --wpver/--no-wpver --perms/--no-perms"
+            echo "Modules: recent, suspicious, uploads, backdoor, obfuscation, phpshell, curl, wpver, perms, all"
+            echo
+            echo "Examples:"
+            echo "  $0 --only recent,uploads --email admin@example.com /var/www/html/site"
+            echo "  $0 --no-wordpress --phpshell --sc /var/www/html/site"
+            echo "  $0 --menu /var/www/html/wordpress"
             exit 0 ;;
         *)
             if [ -z "$ARG_SITE" ]; then
@@ -143,9 +177,10 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$ARG_SITE" ]; then
-    echo "Error: Please provide the path to the WordPress root directory."
-    echo "Usage: $0 [--email <addr>] [--email-always] [--email-from <addr>] [--email-subject <text>] /path/to/wordpress/root"
-    exit 1
+    # No arguments provided: show help and exit
+    echo "Usage: $0 [options] /path/to/site/root"
+    echo "Run with --help to see all options."
+    exit 0
 fi
 
 # Assign the site argument to a variable and sanitize it.
