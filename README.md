@@ -47,7 +47,7 @@ If no arguments are provided, usage is shown.
 - `--only <modules>`: run only these modules (CSV or space‑separated)
 - `--skip <modules>`: skip these modules (CSV or space‑separated)
 - `--no-wordpress`: generic site mode; WP‑specific modules disabled by default
-- `--sc`: show 2 lines of code context around matched signatures
+- `--sc`: show matched lines with line numbers for signature hits (concise triage)
 - `--json`: output a minimal JSON summary of counts by module and overall status
 - `--exit-code <binary|count>`: exit 0/1 in binary mode or return the warning count (capped to 254)
 - `--with-cache`: include `wp-content/cache` in the recent files scan (excluded by default)
@@ -150,7 +150,7 @@ bash wp-scan.sh --zip /var/www/html/scan-flags.zip /var/www/html/site
 
 - `.well-known` and top‑level verification HTML files are detected to help spot unauthorized ownership claims.
 - PHP files inside `wp-content/uploads` are commonly malicious; legitimate sites should store media only.
-- Context preview (`--sc`) shows 2 lines around matched signatures for fast triage.
+- Context preview (`--sc`) prints matched lines with their line numbers (no surrounding context).
 - cURL matches are filtered to ignore standard WP core/theme/plugin paths.
 - This scanner can produce false positives; always verify manually.
 
