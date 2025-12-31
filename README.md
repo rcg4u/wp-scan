@@ -52,6 +52,7 @@ If no arguments are provided, usage is shown.
 - `--exit-code <binary|count>`: exit 0/1 in binary mode or return the warning count (capped to 254)
 - `--with-cache`: include `wp-content/cache` in the recent files scan (excluded by default)
 - `--zip <filename.zip>`: create a zip archive containing flagged files (recent changes, PHP shells, backdoor/obfuscation matches, hidden dotfiles, superglobal patterns, verification files, uploads PHP, world‑writable, filtered cURL). Entries use absolute paths, and a `wp-scan-manifest.txt` is included listing all full paths for easy reference.
+- `--scan-all`: force-enable all modules for this run (overrides default non‑WP exclusions)
 - `--no-cache`: exclude `wp-content/cache` from the recent files scan (cache changes are noisy)
 
 Environment variables for email:
@@ -97,22 +98,23 @@ When `--json` is set, a compact JSON summary like below is printed:
 
 ```json
 {
-	"site": "/var/www/html/site",
-	"status": "WARNINGS",
-	"warnings": 3,
-	"modules": {
-		"recent": 2,
-		"uploads_non_month": 1,
-		"uploads_php": 0,
-		"backdoor": 1,
-		"obfuscation": 0,
-		"phpshell": 0,
-		"hidden": 0,
-		"superglobal": 0,
-		"curl": 0,
-		"perms_world_writable": 0,
-		"verification_files": 1
-	}
+
+  "site": "/var/www/html/site",
+  "status": "WARNINGS",
+  "warnings": 3,
+  "modules": {
+    "recent": 2,
+    "uploads_non_month": 1,
+    "uploads_php": 0,
+    "backdoor": 1,
+    "obfuscation": 0,
+    "phpshell": 0,
+    "hidden": 0,
+    "superglobal": 0,
+    "curl": 0,
+    "perms_world_writable": 0,
+    "verification_files": 1
+  }
 }
 ```
 

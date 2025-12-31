@@ -18,6 +18,7 @@
 #   --json                   Output a minimal JSON summary at the end
 #   --exit-code <mode>       Exit code mode: 'binary' (0/1) or 'count' (0-254)
 #   --zip <filename.zip>     Zip up flagged files into the specified archive
+#   --scan-all               Force-enable all modules for this run
 #
 # Module Triggers (enable/disable individually):
 #   --recent / --no-recent
@@ -61,6 +62,7 @@ EXCLUDE_CACHE=1
 ZIP_ENABLED=0
 ZIP_TARGET_ZIP=""
 ZIP_CANDIDATES=""
+SCAN_ALL=0
 
 # Module toggles (default: run all)
 DO_RECENT=1
@@ -92,7 +94,7 @@ set_module_flag() {
         curl) DO_CURL=1 ;;
         wpver) DO_WPVER=1 ;;
         perms) DO_PERMS=1 ;;
-        all) DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_BACKDOOR=1; DO_OBFUSCATED=1; DO_CURL=1; DO_WPVER=1; DO_PERMS=1 ;;
+        all) DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_UPLOADS_PHP=1; DO_BACKDOOR=1; DO_OBFUSCATED=1; DO_PHPSHELL=1; DO_HIDDEN=1; DO_SUPERGLOBAL=1; DO_CURL=1; DO_WPVER=1; DO_PERMS=1 ;;
     esac
 }
 
@@ -106,7 +108,7 @@ clear_module_flag() {
         curl) DO_CURL=0 ;;
         wpver) DO_WPVER=0 ;;
         perms) DO_PERMS=0 ;;
-        all) DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0 ;;
+        all) DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0 ;;
     esac
 }
 
@@ -143,6 +145,8 @@ while [ $# -gt 0 ]; do
             ZIP_ENABLED=1; ZIP_TARGET_ZIP="$2"; shift 2 ;;
         --with-cache)
             EXCLUDE_CACHE=0; shift ;;
+        --scan-all)
+            SCAN_ALL=1; set_module_flag all; shift ;;
         --recent)
             set_module_flag recent; shift ;;
         --no-recent)
@@ -194,7 +198,7 @@ while [ $# -gt 0 ]; do
         -h|--help)
             echo "Usage: $0 [options] /path/to/site/root"
             echo
-            echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --only <modules> --skip <modules> --no-wordpress --sc --json --exit-code <binary|count> --zip <filename.zip> --with-cache"
+            echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --only <modules> --skip <modules> --no-wordpress --sc --json --exit-code <binary|count> --zip <filename.zip> --with-cache --scan-all"
             echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --uploads-php/--no-uploads-php --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --hidden/--no-hidden --superglobal/--no-superglobal --curl/--no-curl --wpver/--no-wpver --perms/--no-perms"
             echo "Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, hidden, superglobal, curl, wpver, perms, all"
             echo
@@ -295,8 +299,8 @@ else
     VERBOSE_TO_STDOUT=0
 fi
 
-# In non-WordPress mode, disable WP-specific modules by default
-if [ "$WP_MODE" -eq 0 ]; then
+# In non-WordPress mode, disable WP-specific modules by default unless --scan-all was requested
+if [ "$WP_MODE" -eq 0 ] && [ "$SCAN_ALL" -eq 0 ]; then
     DO_WPVER=0
     DO_UPLOADS=0
     DO_UPLOADS_PHP=0
