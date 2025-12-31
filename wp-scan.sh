@@ -370,11 +370,11 @@ if [ "$DO_BACKDOOR" -eq 1 ]; then
         FILTERED_BACKDOOR=$(echo "$BACKDOOR_MATCH" | grep -v -E "wp-includes/|wp-admin/|wp-content/plugins/|wp-content/themes/" | head -10)
         echo "$FILTERED_BACKDOOR"
         if [ "$SHOW_CONTEXT" -eq 1 ]; then
-            echo "  -> Showing 2 lines of context for backdoor signatures (first 3 matches per file):"
+            echo "  -> Showing matched lines with line numbers (first 3 matches per file):"
             printf "%s\n" "$FILTERED_BACKDOOR" | while IFS= read -r f; do
                 [ -z "$f" ] && continue
                 echo "----- $f -----"
-                grep -n -I -E "$BACKDOOR_PATTERN" -C 2 -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+                grep -n -I -E "$BACKDOOR_PATTERN" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
             done
         fi
     else
@@ -392,11 +392,11 @@ if [ "$DO_OBFUSCATED" -eq 1 ]; then
         FILTERED_OBFUSCATED=$(echo "$OBFUSCATED_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -10)
         echo "$FILTERED_OBFUSCATED"
         if [ "$SHOW_CONTEXT" -eq 1 ]; then
-            echo "  -> Showing 2 lines of context for obfuscation signatures (first 3 matches per file):"
+            echo "  -> Showing matched lines with line numbers (first 3 matches per file):"
             printf "%s\n" "$FILTERED_OBFUSCATED" | while IFS= read -r f; do
                 [ -z "$f" ] && continue
                 echo "----- $f -----"
-                grep -n -I -E "$OBFUSCATED_PATTERN" -C 2 -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+                grep -n -I -E "$OBFUSCATED_PATTERN" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
             done
         fi
     else
@@ -418,12 +418,12 @@ if [ "$DO_PHPSHELL" -eq 1 ]; then
         echo "$PHPSHELL_UNIQUE" | head -20
 
         if [ "$SHOW_CONTEXT" -eq 1 ]; then
-            echo "  -> Showing 2 lines of context around signature matches (first 3 matches per file):"
+            echo "  -> Showing matched lines with line numbers (first 3 matches per file):"
             printf "%s\n" "$PHPSHELL_UNIQUE" | head -20 | while IFS= read -r f; do
                 [ -z "$f" ] && continue
                 echo "----- $f -----"
                 if grep -q -I -E "$PHPSHELL_SIG_PATTERN" "$f" 2>/dev/null; then
-                    grep -n -I -E "$PHPSHELL_SIG_PATTERN" -C 2 -m 3 "$f" 2>/dev/null
+                    grep -n -I -E "$PHPSHELL_SIG_PATTERN" -m 3 "$f" 2>/dev/null
                 else
                     echo "(flagged by filename; no signature lines found)"
                 fi
@@ -456,11 +456,11 @@ if [ "$DO_SUPERGLOBAL" -eq 1 ]; then
         echo "!!! WARNING: Superglobal-driven exec/eval patterns found:"
         echo "$SUPER_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -20
         if [ "$SHOW_CONTEXT" -eq 1 ]; then
-            echo "  -> Showing 2 lines of context (first 3 matches per file):"
+            echo "  -> Showing matched lines with line numbers (first 3 matches per file):"
             printf "%s\n" "$SUPER_MATCH" | head -20 | while IFS= read -r f; do
                 [ -z "$f" ] && continue
                 echo "----- $f -----"
-                grep -n -I -E "$SUPER_PATTERN" -C 2 -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+                grep -n -I -E "$SUPER_PATTERN" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
             done
         fi
     else
