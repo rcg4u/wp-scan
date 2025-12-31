@@ -94,6 +94,42 @@ while [ $# -gt 0 ]; do
             WP_MODE=0; shift ;;
         --sc)
             SHOW_CONTEXT=1; shift ;;
+        --recent)
+            set_module_flag recent; shift ;;
+        --no-recent)
+            clear_module_flag recent; shift ;;
+        --suspicious)
+            set_module_flag suspicious; shift ;;
+        --no-suspicious)
+            clear_module_flag suspicious; shift ;;
+        --uploads)
+            set_module_flag uploads; shift ;;
+        --no-uploads)
+            clear_module_flag uploads; shift ;;
+        --backdoor)
+            set_module_flag backdoor; shift ;;
+        --no-backdoor)
+            clear_module_flag backdoor; shift ;;
+        --obfuscation)
+            set_module_flag obfuscation; shift ;;
+        --no-obfuscation)
+            clear_module_flag obfuscation; shift ;;
+        --phpshell)
+            DO_PHPSHELL=1; shift ;;
+        --no-phpshell)
+            DO_PHPSHELL=0; shift ;;
+        --curl)
+            set_module_flag curl; shift ;;
+        --no-curl)
+            clear_module_flag curl; shift ;;
+        --wpver)
+            set_module_flag wpver; shift ;;
+        --no-wpver)
+            clear_module_flag wpver; shift ;;
+        --perms)
+            set_module_flag perms; shift ;;
+        --no-perms)
+            clear_module_flag perms; shift ;;
         -h|--help)
             echo "Usage: $0 [--email <addr>] [--email-always] [--email-from <addr>] [--email-subject <text>] /path/to/wordpress/root"
             exit 0 ;;
