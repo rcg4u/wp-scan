@@ -630,15 +630,28 @@ if [ "$ZIP_ENABLED" -eq 1 ]; then
     else
         echo "Creating zip archive of flagged files: $ZIP_TARGET_ZIP"
         FILE_LIST=$(mktemp -t wp-scan-ziplist-XXXXXX.txt)
-        # Collect only existing files, unique
+        # Collect only existing files, unique (absolute paths)
         printf "%s\n" "$ZIP_CANDIDATES" | sed '/^\s*$/d' | while IFS= read -r p; do
             [ -f "$p" ] && echo "$p"
         done | sort -u > "$FILE_LIST"
         COUNT=$(wc -l < "$FILE_LIST" | awk '{print $1}')
         if [ "$COUNT" -gt 0 ]; then
-            # Create zip from list
+            # Create zip from list; entries will use the absolute path as listed
             zip -@ "$ZIP_TARGET_ZIP" < "$FILE_LIST"
-            echo "Zip created ($COUNT files): $ZIP_TARGET_ZIP"
+            # Add a manifest with the full absolute paths for easy reference
+            MANIFEST_TMP=$(mktemp -t wp-scan-manifest-XXXXXX.txt)
+            {
+                echo "wp-scan manifest"
+                echo "site: $SITE_PATH"
+                echo "created: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                echo "files:"
+                cat "$FILE_LIST"
+            } > "$MANIFEST_TMP"
+            MANIFEST_NAME="wp-scan-manifest.txt"
+            cp "$MANIFEST_TMP" "$MANIFEST_NAME"
+            zip "$ZIP_TARGET_ZIP" "$MANIFEST_NAME" >/dev/null 2>&1
+            rm -f "$MANIFEST_NAME" "$MANIFEST_TMP"
+            echo "Zip created ($COUNT files): $ZIP_TARGET_ZIP (includes $MANIFEST_NAME)"
         else
             echo "No files to zip. Archive not created."
         fi

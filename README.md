@@ -51,7 +51,7 @@ If no arguments are provided, usage is shown.
 - `--json`: output a minimal JSON summary of counts by module and overall status
 - `--exit-code <binary|count>`: exit 0/1 in binary mode or return the warning count (capped to 254)
 - `--with-cache`: include `wp-content/cache` in the recent files scan (excluded by default)
-- `--zip <filename.zip>`: create a zip archive containing flagged files (recent changes, PHP shells, backdoor/obfuscation matches, hidden dotfiles, superglobal patterns, verification files, uploads PHP, world‑writable, filtered cURL)
+- `--zip <filename.zip>`: create a zip archive containing flagged files (recent changes, PHP shells, backdoor/obfuscation matches, hidden dotfiles, superglobal patterns, verification files, uploads PHP, world‑writable, filtered cURL). Entries use absolute paths, and a `wp-scan-manifest.txt` is included listing all full paths for easy reference.
 - `--no-cache`: exclude `wp-content/cache` from the recent files scan (cache changes are noisy)
 
 Environment variables for email:
