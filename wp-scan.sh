@@ -3,21 +3,52 @@
 # ====================================================================
 # Generic WordPress Security Scanner
 #
-# Usage: ./generic_wp_scan.sh /path/to/wordpress/root
-# Example: ./generic_wp_scan.sh /var/www/html/wordpress
+# Usage: ./generic_wp_scan.sh [--email <addr>] [--email-always] [--email-from <addr>] [--email-subject <text>] /path/to/wordpress/root
+# Example: ./generic_wp_scan.sh --email admin@example.com /var/www/html/wordpress
 # ====================================================================
 
 # --- Script Logic ---
 
-# Check if a directory was provided as an argument.
-if [ -z "$1" ]; then
+# --- Argument Parsing (email support) ---
+# Allow configuration through CLI flags or environment variables
+# Env vars: WP_SCAN_EMAIL_TO, WP_SCAN_EMAIL_FROM, WP_SCAN_EMAIL_SUBJECT, WP_SCAN_EMAIL_ALWAYS
+EMAIL_TO="${WP_SCAN_EMAIL_TO:-}"
+EMAIL_FROM="${WP_SCAN_EMAIL_FROM:-}"
+EMAIL_SUBJECT="${WP_SCAN_EMAIL_SUBJECT:-}"
+EMAIL_ALWAYS="${WP_SCAN_EMAIL_ALWAYS:-0}"
+
+ARG_SITE=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -e|--email)
+            EMAIL_TO="$2"; shift 2 ;;
+        --email-from)
+            EMAIL_FROM="$2"; shift 2 ;;
+        --email-subject)
+            EMAIL_SUBJECT="$2"; shift 2 ;;
+        --email-always)
+            EMAIL_ALWAYS=1; shift ;;
+        -h|--help)
+            echo "Usage: $0 [--email <addr>] [--email-always] [--email-from <addr>] [--email-subject <text>] /path/to/wordpress/root"
+            exit 0 ;;
+        *)
+            if [ -z "$ARG_SITE" ]; then
+                ARG_SITE="$1"; shift
+            else
+                echo "Warning: Unrecognized extra argument '$1' will be ignored." ; shift
+            fi ;;
+    esac
+done
+
+if [ -z "$ARG_SITE" ]; then
     echo "Error: Please provide the path to the WordPress root directory."
-    echo "Usage: $0 /path/to/wordpress/root"
+    echo "Usage: $0 [--email <addr>] [--email-always] [--email-from <addr>] [--email-subject <text>] /path/to/wordpress/root"
     exit 1
 fi
 
-# Assign the first argument to a variable and sanitize it.
-SITE_PATH=$(realpath "$1")
+# Assign the site argument to a variable and sanitize it.
+SITE_PATH=$(realpath "$ARG_SITE")
 
 # Check if the provided path actually exists and is a directory.
 if [ ! -d "$SITE_PATH" ]; then
@@ -34,6 +65,23 @@ fi
 echo "=========================================================================="
 echo "Starting Generic WordPress Security Scan for: $SITE_PATH"
 echo "=========================================================================="
+
+# --- Prepare log capture so we can email the full report later ---
+if command -v mktemp >/dev/null 2>&1; then
+    LOG_FILE=$(mktemp -t wp-scan-XXXXXX.log)
+else
+    LOG_FILE="$SITE_PATH/wp-scan-$(date +%Y%m%d%H%M%S).log"
+fi
+
+VERBOSE_TO_STDOUT=1
+if command -v tee >/dev/null 2>&1; then
+    # Mirror output to both stdout and the log file
+    exec > >(tee -a "$LOG_FILE") 2>&1
+else
+    # Fallback: only log file (we'll print it back at the end)
+    exec >>"$LOG_FILE" 2>&1
+    VERBOSE_TO_STDOUT=0
+fi
 
 # --- 1. Check for Recently Modified Files ---
 echo -e "\n[+] Checking for recently modified files (any type) in the last 60 minutes..."
@@ -138,3 +186,48 @@ echo "==========================================================================
 echo "Disclaimer: This script is a powerful scanning aid. It may produce false"
 echo "positives. All findings should be manually investigated and verified."
 echo "=========================================================================="
+
+# --- Email Notification (optional) ---
+if [ -n "$EMAIL_TO" ]; then
+    WARN_COUNT=$(grep -c "!!! WARNING" "$LOG_FILE" 2>/dev/null || echo 0)
+    if [ "$EMAIL_ALWAYS" = "1" ] || [ "${WARN_COUNT}" -gt 0 ]; then
+        STATUS="OK"
+        [ "${WARN_COUNT}" -gt 0 ] && STATUS="WARNINGS"
+        SUBJECT="${EMAIL_SUBJECT:-Generic WP Scan: $SITE_PATH} [$STATUS]"
+
+        if command -v mail >/dev/null 2>&1 && [ -z "$EMAIL_FROM" ]; then
+            mail -s "$SUBJECT" "$EMAIL_TO" < "$LOG_FILE"
+            echo "Notification email sent via 'mail' to $EMAIL_TO."
+        elif command -v sendmail >/dev/null 2>&1; then
+            {
+                echo "To: $EMAIL_TO"
+                echo "From: ${EMAIL_FROM:-no-reply@localhost}"
+                echo "Subject: $SUBJECT"
+                echo "Content-Type: text/plain; charset=UTF-8"
+                echo
+                cat "$LOG_FILE"
+            } | sendmail -t
+            echo "Notification email sent via 'sendmail' to $EMAIL_TO."
+        elif command -v msmtp >/dev/null 2>&1; then
+            {
+                echo "To: $EMAIL_TO"
+                echo "From: ${EMAIL_FROM:-no-reply@localhost}"
+                echo "Subject: $SUBJECT"
+                echo "Content-Type: text/plain; charset=UTF-8"
+                echo
+                cat "$LOG_FILE"
+            } | msmtp -t
+            echo "Notification email sent via 'msmtp' to $EMAIL_TO."
+        else
+            echo "Email not sent: no mail/sendmail/msmtp found."
+        fi
+    else
+        echo "Email not sent: no warnings found and --email-always not specified."
+    fi
+fi
+
+# If we couldn't tee to stdout earlier, show the captured log now
+if [ "$VERBOSE_TO_STDOUT" -eq 0 ]; then
+    echo "---- Scan Output ----"
+    cat "$LOG_FILE"
+fi
