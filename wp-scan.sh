@@ -19,6 +19,50 @@ EMAIL_ALWAYS="${WP_SCAN_EMAIL_ALWAYS:-0}"
 
 ARG_SITE=""
 
+# Module toggles (default: run all)
+DO_RECENT=1
+DO_SUSPICIOUS=1
+DO_UPLOADS=1
+DO_BACKDOOR=1
+DO_OBFUSCATED=1
+DO_CURL=1
+DO_WPVER=1
+DO_PERMS=1
+
+MENU_MODE=0
+
+enable_only_defaults() {
+    DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0
+}
+
+set_module_flag() {
+    case "$1" in
+        recent) DO_RECENT=1 ;;
+        suspicious) DO_SUSPICIOUS=1 ;;
+        uploads) DO_UPLOADS=1 ;;
+        backdoor) DO_BACKDOOR=1 ;;
+        obfuscation) DO_OBFUSCATED=1 ;;
+        curl) DO_CURL=1 ;;
+        wpver) DO_WPVER=1 ;;
+        perms) DO_PERMS=1 ;;
+        all) DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_BACKDOOR=1; DO_OBFUSCATED=1; DO_CURL=1; DO_WPVER=1; DO_PERMS=1 ;;
+    esac
+}
+
+clear_module_flag() {
+    case "$1" in
+        recent) DO_RECENT=0 ;;
+        suspicious) DO_SUSPICIOUS=0 ;;
+        uploads) DO_UPLOADS=0 ;;
+        backdoor) DO_BACKDOOR=0 ;;
+        obfuscation) DO_OBFUSCATED=0 ;;
+        curl) DO_CURL=0 ;;
+        wpver) DO_WPVER=0 ;;
+        perms) DO_PERMS=0 ;;
+        all) DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0 ;;
+    esac
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         -e|--email)
@@ -29,6 +73,17 @@ while [ $# -gt 0 ]; do
             EMAIL_SUBJECT="$2"; shift 2 ;;
         --email-always)
             EMAIL_ALWAYS=1; shift ;;
+        --menu)
+            MENU_MODE=1; shift ;;
+        --only)
+            enable_only_defaults
+            LIST=$(echo "$2" | tr ',' ' ')
+            for m in $LIST; do set_module_flag "$m"; done
+            shift 2 ;;
+        --skip)
+            LIST=$(echo "$2" | tr ',' ' ')
+            for m in $LIST; do clear_module_flag "$m"; done
+            shift 2 ;;
         -h|--help)
             echo "Usage: $0 [--email <addr>] [--email-always] [--email-from <addr>] [--email-subject <text>] /path/to/wordpress/root"
             exit 0 ;;
@@ -66,6 +121,36 @@ echo "==========================================================================
 echo "Starting Generic WordPress Security Scan for: $SITE_PATH"
 echo "=========================================================================="
 
+# Optional interactive module selection
+if [ "$MENU_MODE" -eq 1 ]; then
+    echo "Interactive Module Selection"
+    echo "  1) Recently modified files"
+    echo "  2) Suspicious file/directory names"
+    echo "  3) Non-month directories in uploads"
+    echo "  4) High-risk backdoor functions (PHP)"
+    echo "  5) Obfuscated code (PHP)"
+    echo "  6) cURL calls (PHP)"
+    echo "  7) WordPress version"
+    echo "  8) File permissions"
+    echo "Select modules to run (e.g., 1,3,8) or press Enter for default (all):"
+    read -r USER_SEL
+    if [ -n "$USER_SEL" ]; then
+        enable_only_defaults
+        for n in $(echo "$USER_SEL" | tr ',' ' '); do
+            case "$n" in
+                1) DO_RECENT=1 ;;
+                2) DO_SUSPICIOUS=1 ;;
+                3) DO_UPLOADS=1 ;;
+                4) DO_BACKDOOR=1 ;;
+                5) DO_OBFUSCATED=1 ;;
+                6) DO_CURL=1 ;;
+                7) DO_WPVER=1 ;;
+                8) DO_PERMS=1 ;;
+            esac
+        done
+    fi
+fi
+
 # --- Prepare log capture so we can email the full report later ---
 if command -v mktemp >/dev/null 2>&1; then
     LOG_FILE=$(mktemp -t wp-scan-XXXXXX.log)
@@ -84,39 +169,45 @@ else
 fi
 
 # --- 1. Check for Recently Modified Files ---
-echo -e "\n[+] Checking for recently modified files (any type) in the last 60 minutes..."
-RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 2>/dev/null)
-if [ -n "$RECENT_FILES" ]; then
-    echo "!!! WARNING: Recently modified files found. Please review them:"
-    echo "$RECENT_FILES"
-else
-    echo "OK: No recently modified files found."
+if [ "$DO_RECENT" -eq 1 ]; then
+    echo -e "\n[+] Checking for recently modified files (any type) in the last 60 minutes..."
+    RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 2>/dev/null)
+    if [ -n "$RECENT_FILES" ]; then
+        echo "!!! WARNING: Recently modified files found. Please review them:"
+        echo "$RECENT_FILES"
+    else
+        echo "OK: No recently modified files found."
+    fi
 fi
 
 # --- 2. Check for Suspicious File/Directory Names ---
-echo -e "\n[+] Checking for suspicious file/directory names..."
+if [ "$DO_SUSPICIOUS" -eq 1 ]; then
+    echo -e "\n[+] Checking for suspicious file/directory names..."
 
-# Common backdoor file/directory names
-SUSPICIOUS_NAMES=("cg-bin" "phpshell" "c99" "r57" "webshell" "wso" "adminer.php" "phpmyadmin" "xmlrpc.php")
-for name in "${SUSPICIOUS_NAMES[@]}"; do
-    if [ -f "$SITE_PATH/$name" ] || [ -d "$SITE_PATH/$name" ]; then
-        echo "!!! WARNING: Suspicious file/directory found: '/$name'"
-    fi
-done
+    # Common backdoor file/directory names
+    SUSPICIOUS_NAMES=("cg-bin" "phpshell" "c99" "r57" "webshell" "wso" "adminer.php" "phpmyadmin" "xmlrpc.php")
+    for name in "${SUSPICIOUS_NAMES[@]}"; do
+        if [ -f "$SITE_PATH/$name" ] || [ -d "$SITE_PATH/$name" ]; then
+            echo "!!! WARNING: Suspicious file/directory found: '/$name'"
+        fi
+    done
+fi
 
 # Check for non-standard directories in uploads (e.g., month > 12)
-UPLOADS_DIR="$SITE_PATH/wp-content/uploads"
-if [ -d "$UPLOADS_DIR" ]; then
-    # Find directories in uploads with a numeric basename that is not a valid month (01-12)
-    FAKE_MONTH_DIRS=$(find "$UPLOADS_DIR" -maxdepth 2 -type d -name "[0-9]*" -print 2>/dev/null | while read -r DIR; do
-        BASENAME=$(basename "$DIR")
-        if [[ "$BASENAME" =~ ^[0-9]+$ ]] && ! [[ "$BASENAME" =~ ^0[1-9]$|^1[0-2]$ ]]; then
-            echo "$DIR"
+if [ "$DO_UPLOADS" -eq 1 ]; then
+    UPLOADS_DIR="$SITE_PATH/wp-content/uploads"
+    if [ -d "$UPLOADS_DIR" ]; then
+        # Find directories in uploads with a numeric basename that is not a valid month (01-12)
+        FAKE_MONTH_DIRS=$(find "$UPLOADS_DIR" -maxdepth 2 -type d -name "[0-9]*" -print 2>/dev/null | while read -r DIR; do
+            BASENAME=$(basename "$DIR")
+            if [[ "$BASENAME" =~ ^[0-9]+$ ]] && ! [[ "$BASENAME" =~ ^0[1-9]$|^1[0-2]$ ]]; then
+                echo "$DIR"
+            fi
+        done)
+        if [ -n "$FAKE_MONTH_DIRS" ]; then
+            echo "!!! WARNING: Found non-month directories in uploads (possible backdoors):"
+            echo "$FAKE_MONTH_DIRS"
         fi
-    done)
-    if [ -n "$FAKE_MONTH_DIRS" ]; then
-        echo "!!! WARNING: Found non-month directories in uploads (possible backdoors):"
-        echo "$FAKE_MONTH_DIRS"
     fi
 fi
 
@@ -129,60 +220,71 @@ fi
 
 
 # --- 3. Search for Malicious Code Patterns ---
-echo -e "\n[+] Searching for malicious code patterns in PHP files..."
+if [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ]; then
+    echo -e "\n[+] Searching for malicious code patterns in PHP files..."
+fi
 
 # Search for common backdoor functions
-echo "  -> Searching for high-risk backdoor functions..."
-BACKDOOR_MATCH=$(grep -R -l -i --include="*.php" -e "eval\s*(" -e "base64_decode\s*(" -e "shell_exec\s*(" -e "passthru\s*(" -e "system\s*(" -e "exec\s*(" "$SITE_PATH" 2>/dev/null)
-if [ -n "$BACKDOOR_MATCH" ]; then
-    echo "!!! WARNING: Found high-risk functions. Review these files:"
-    # Filter out known WordPress core files to reduce noise
-    echo "$BACKDOOR_MATCH" | grep -v -E "wp-includes/|wp-admin/|wp-content/plugins/|wp-content/themes/" | head -10
-else
-    echo "OK: No high-risk functions found in non-standard locations."
+if [ "$DO_BACKDOOR" -eq 1 ]; then
+    echo "  -> Searching for high-risk backdoor functions..."
+    BACKDOOR_MATCH=$(grep -R -l -i --include="*.php" -e "eval\s*(" -e "base64_decode\s*(" -e "shell_exec\s*(" -e "passthru\s*(" -e "system\s*(" -e "exec\s*(" "$SITE_PATH" 2>/dev/null)
+    if [ -n "$BACKDOOR_MATCH" ]; then
+        echo "!!! WARNING: Found high-risk functions. Review these files:"
+        echo "$BACKDOOR_MATCH" | grep -v -E "wp-includes/|wp-admin/|wp-content/plugins/|wp-content/themes/" | head -10
+    else
+        echo "OK: No high-risk functions found in non-standard locations."
+    fi
 fi
 
 # Search for obfuscated code patterns
-echo "  -> Searching for obfuscated code (base64, gzinflate, str_rot13)..."
-OBFUSCATED_MATCH=$(grep -R -l -i --include="*.php" -e "base64_decode" -e "gzinflate(" -e "str_rot13(" -e "strrev(" "$SITE_PATH" 2>/dev/null)
-if [ -n "$OBFUSCATED_MATCH" ]; then
-    echo "!!! WARNING: Found potentially obfuscated code. Review these files:"
-    echo "$OBFUSCATED_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -10
-else
-    echo "OK: No obvious obfuscated code found."
+if [ "$DO_OBFUSCATED" -eq 1 ]; then
+    echo "  -> Searching for obfuscated code (base64, gzinflate, str_rot13)..."
+    OBFUSCATED_MATCH=$(grep -R -l -i --include="*.php" -e "base64_decode" -e "gzinflate(" -e "str_rot13(" -e "strrev(" "$SITE_PATH" 2>/dev/null)
+    if [ -n "$OBFUSCATED_MATCH" ]; then
+        echo "!!! WARNING: Found potentially obfuscated code. Review these files:"
+        echo "$OBFUSCATED_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -10
+    else
+        echo "OK: No obvious obfuscated code found."
+    fi
 fi
 
 # Search for hidden cURL calls
-echo "  -> Searching for cURL calls to external domains..."
-CURL_MATCH=$(grep -R -l --include="*.php" -e "curl_init" "$SITE_PATH" 2>/dev/null)
-if [ -n "$CURL_MATCH" ]; then
-    echo "!!! WARNING: Found cURL calls. These are common in backdoors. Review these files:"
-    echo "$CURL_MATCH" | grep -v -E "wp-includes/|wp-content/themes/|wp-content/plugins/" | head -10
-else
-    echo "OK: No cURL calls found in non-standard locations."
+if [ "$DO_CURL" -eq 1 ]; then
+    echo "  -> Searching for cURL calls to external domains..."
+    CURL_MATCH=$(grep -R -l --include="*.php" -e "curl_init" "$SITE_PATH" 2>/dev/null)
+    if [ -n "$CURL_MATCH" ]; then
+        echo "!!! WARNING: Found cURL calls. These are common in backdoors. Review these files:"
+        echo "$CURL_MATCH" | grep -v -E "wp-includes/|wp-content/themes/|wp-content/plugins/" | head -10
+    else
+        echo "OK: No cURL calls found in non-standard locations."
+    fi
 fi
 
 
 # --- 4. Check for WordPress Version Vulnerabilities ---
-echo -e "\n[+] Checking WordPress version..."
-if [ -f "$SITE_PATH/wp-includes/version.php" ]; then
-    WP_VERSION=$(grep -o "wp_version = '[^^']*'" "$SITE_PATH/wp-includes/version.php" | sed "s/wp_version = '//" | sed "s/'//")
-    echo "  -> Detected WordPress version: $WP_VERSION"
-    echo "  -> Manual check required: Please compare this version against the WordPress.org security advisories to see if it's outdated."
-else
-    echo "Could not determine WordPress version."
+if [ "$DO_WPVER" -eq 1 ]; then
+    echo -e "\n[+] Checking WordPress version..."
+    if [ -f "$SITE_PATH/wp-includes/version.php" ]; then
+        WP_VERSION=$(grep -o "wp_version = '[^^']*'" "$SITE_PATH/wp-includes/version.php" | sed "s/wp_version = '//" | sed "s/'//")
+        echo "  -> Detected WordPress version: $WP_VERSION"
+        echo "  -> Manual check required: Please compare this version against the WordPress.org security advisories to see if it's outdated."
+    else
+        echo "Could not determine WordPress version."
+    fi
 fi
 
 
 # --- 5. Check File Permissions ---
-echo -e "\n[+] Checking for insecure file permissions..."
-echo "  -> Checking for world-writable files..."
-WRITABLE_FILES=$(find "$SITE_PATH" -type f -perm /002 -not -path "*/wp-content/cache/*" -not -path "*/wp-content/uploads/*" 2>/dev/null | head -5)
-if [ -n "$WRITABLE_FILES" ]; then
-    echo "!!! WARNING: Found world-writable files (showing first 5):"
-    echo "$WRITABLE_FILES"
-else
-    echo "OK: No obvious world-writable files found outside uploads/cache."
+if [ "$DO_PERMS" -eq 1 ]; then
+    echo -e "\n[+] Checking for insecure file permissions..."
+    echo "  -> Checking for world-writable files..."
+    WRITABLE_FILES=$(find "$SITE_PATH" -type f -perm /002 -not -path "*/wp-content/cache/*" -not -path "*/wp-content/uploads/*" 2>/dev/null | head -5)
+    if [ -n "$WRITABLE_FILES" ]; then
+        echo "!!! WARNING: Found world-writable files (showing first 5):"
+        echo "$WRITABLE_FILES"
+    else
+        echo "OK: No obvious world-writable files found outside uploads/cache."
+    fi
 fi
 
 echo -e "\n=========================================================================="
