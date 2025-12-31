@@ -17,6 +17,7 @@
 #   --sc                     Show 2 lines of code context around matched signatures
 #   --json                   Output a minimal JSON summary at the end
 #   --exit-code <mode>       Exit code mode: 'binary' (0/1) or 'count' (0-254)
+#   --zip <filename.zip>     Zip up flagged files into the specified archive
 #
 # Module Triggers (enable/disable individually):
 #   --recent / --no-recent
@@ -57,6 +58,9 @@ SHOW_CONTEXT=0
 JSON_OUTPUT=0
 EXIT_CODE_MODE="binary"
 EXCLUDE_CACHE=1
+ZIP_ENABLED=0
+ZIP_TARGET_ZIP=""
+ZIP_CANDIDATES=""
 
 # Module toggles (default: run all)
 DO_RECENT=1
@@ -135,6 +139,8 @@ while [ $# -gt 0 ]; do
             JSON_OUTPUT=1; shift ;;
         --exit-code)
             EXIT_CODE_MODE="$2"; shift 2 ;;
+        --zip)
+            ZIP_ENABLED=1; ZIP_TARGET_ZIP="$2"; shift 2 ;;
         --with-cache)
             EXCLUDE_CACHE=0; shift ;;
         --recent)
@@ -188,7 +194,7 @@ while [ $# -gt 0 ]; do
         -h|--help)
             echo "Usage: $0 [options] /path/to/site/root"
             echo
-            echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --only <modules> --skip <modules> --no-wordpress --sc --json --exit-code <binary|count> --with-cache"
+            echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --only <modules> --skip <modules> --no-wordpress --sc --json --exit-code <binary|count> --zip <filename.zip> --with-cache"
             echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --uploads-php/--no-uploads-php --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --hidden/--no-hidden --superglobal/--no-superglobal --curl/--no-curl --wpver/--no-wpver --perms/--no-perms"
             echo "Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, hidden, superglobal, curl, wpver, perms, all"
             echo
@@ -307,6 +313,7 @@ if [ "$DO_RECENT" -eq 1 ]; then
     if [ -n "$RECENT_FILES" ]; then
         echo "!!! WARNING: Recently modified files found. Please review them:"
         echo "$RECENT_FILES"
+        ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$RECENT_FILES")
     else
         echo "OK: No recently modified files found."
     fi
@@ -321,6 +328,9 @@ if [ "$DO_SUSPICIOUS" -eq 1 ]; then
     for name in "${SUSPICIOUS_NAMES[@]}"; do
         if [ -f "$SITE_PATH/$name" ] || [ -d "$SITE_PATH/$name" ]; then
             echo "!!! WARNING: Suspicious file/directory found: '/$name'"
+            if [ -f "$SITE_PATH/$name" ]; then
+                ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$SITE_PATH/$name")
+            fi
         fi
     done
 fi
@@ -346,6 +356,7 @@ if [ "$DO_UPLOADS" -eq 1 ]; then
             if [ -n "$UPLOADS_PHP_FILES" ]; then
                 echo "!!! WARNING: Found PHP files inside uploads (should be media only):"
                 echo "$UPLOADS_PHP_FILES"
+                ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$UPLOADS_PHP_FILES")
             else
                 echo "OK: No PHP files found inside uploads."
             fi
@@ -359,6 +370,7 @@ VERIFICATION_FILES=$( { find "$SITE_PATH" -maxdepth 1 -type f \( -name "google*.
 if [ -n "$VERIFICATION_FILES" ]; then
     echo "!!! WARNING: Found verification files. These could be for unauthorized ownership claims:"
     echo "$VERIFICATION_FILES"
+    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$VERIFICATION_FILES")
 fi
 
 
@@ -376,6 +388,7 @@ if [ "$DO_BACKDOOR" -eq 1 ]; then
         echo "!!! WARNING: Found high-risk functions. Review these files:"
         FILTERED_BACKDOOR=$(echo "$BACKDOOR_MATCH" | grep -v -E "wp-includes/|wp-admin/|wp-content/plugins/|wp-content/themes/" | head -10)
         echo "$FILTERED_BACKDOOR"
+    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_BACKDOOR")
         if [ "$SHOW_CONTEXT" -eq 1 ]; then
             echo "  -> Showing matched lines with line numbers (first 3 matches per file):"
             printf "%s\n" "$FILTERED_BACKDOOR" | while IFS= read -r f; do
@@ -398,6 +411,7 @@ if [ "$DO_OBFUSCATED" -eq 1 ]; then
         echo "!!! WARNING: Found potentially obfuscated code. Review these files:"
         FILTERED_OBFUSCATED=$(echo "$OBFUSCATED_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -10)
         echo "$FILTERED_OBFUSCATED"
+    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_OBFUSCATED")
         if [ "$SHOW_CONTEXT" -eq 1 ]; then
             echo "  -> Showing matched lines with line numbers (first 3 matches per file):"
             printf "%s\n" "$FILTERED_OBFUSCATED" | while IFS= read -r f; do
@@ -423,6 +437,7 @@ if [ "$DO_PHPSHELL" -eq 1 ]; then
         echo "!!! WARNING: Potential PHP shell indicators found. Review these files:"
         PHPSHELL_UNIQUE=$( { echo "$PHPSHELL_MATCH"; echo "$PHPSHELL_NAMES"; } | grep -v -E "wp-includes/|wp-admin/" | sort -u )
         echo "$PHPSHELL_UNIQUE" | head -20
+    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$PHPSHELL_UNIQUE")
 
         if [ "$SHOW_CONTEXT" -eq 1 ]; then
             echo "  -> Showing matched lines with line numbers (first 3 matches per file):"
@@ -449,6 +464,7 @@ if [ "$DO_HIDDEN" -eq 1 ]; then
     if [ -n "$HIDDEN_FILES" ]; then
         echo "!!! WARNING: Hidden files found (could expose secrets or be used for persistence):"
         echo "$HIDDEN_FILES" | head -20
+        ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$HIDDEN_FILES")
     else
         echo "OK: No hidden dotfiles found (excluding VCS and .well-known)."
     fi
@@ -462,6 +478,7 @@ if [ "$DO_SUPERGLOBAL" -eq 1 ]; then
     if [ -n "$SUPER_MATCH" ]; then
         echo "!!! WARNING: Superglobal-driven exec/eval patterns found:"
         echo "$SUPER_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -20
+        ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$SUPER_MATCH")
         if [ "$SHOW_CONTEXT" -eq 1 ]; then
             echo "  -> Showing matched lines with line numbers (first 3 matches per file):"
             printf "%s\n" "$SUPER_MATCH" | head -20 | while IFS= read -r f; do
@@ -481,7 +498,9 @@ if [ "$DO_CURL" -eq 1 ]; then
     CURL_MATCH=$(grep -R -l --include="*.php" -e "curl_init" "$SITE_PATH" 2>/dev/null)
     if [ -n "$CURL_MATCH" ]; then
         echo "!!! WARNING: Found cURL calls. These are common in backdoors. Review these files:"
-        echo "$CURL_MATCH" | grep -v -E "wp-includes/|wp-content/themes/|wp-content/plugins/" | head -10
+        FILTERED_CURL=$(echo "$CURL_MATCH" | grep -v -E "wp-includes/|wp-content/themes/|wp-content/plugins/")
+        echo "$FILTERED_CURL" | head -10
+        ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_CURL")
     else
         echo "OK: No cURL calls found in non-standard locations."
     fi
@@ -509,6 +528,7 @@ if [ "$DO_PERMS" -eq 1 ]; then
     if [ -n "$WRITABLE_FILES" ]; then
         echo "!!! WARNING: Found world-writable files (showing first 5):"
         echo "$WRITABLE_FILES"
+        ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$WRITABLE_FILES")
     else
         echo "OK: No obvious world-writable files found outside uploads/cache."
     fi
@@ -601,6 +621,29 @@ if [ "$JSON_OUTPUT" -eq 1 ]; then
     echo "    \"verification_files\": $VERIF_COUNT"
     echo "  }"
     echo "}"
+fi
+
+# --- Zip flagged files (optional) ---
+if [ "$ZIP_ENABLED" -eq 1 ]; then
+    if ! command -v zip >/dev/null 2>&1; then
+        echo "Zip requested but 'zip' command not found. Skipping archive creation."
+    else
+        echo "Creating zip archive of flagged files: $ZIP_TARGET_ZIP"
+        FILE_LIST=$(mktemp -t wp-scan-ziplist-XXXXXX.txt)
+        # Collect only existing files, unique
+        printf "%s\n" "$ZIP_CANDIDATES" | sed '/^\s*$/d' | while IFS= read -r p; do
+            [ -f "$p" ] && echo "$p"
+        done | sort -u > "$FILE_LIST"
+        COUNT=$(wc -l < "$FILE_LIST" | awk '{print $1}')
+        if [ "$COUNT" -gt 0 ]; then
+            # Create zip from list
+            zip -@ "$ZIP_TARGET_ZIP" < "$FILE_LIST"
+            echo "Zip created ($COUNT files): $ZIP_TARGET_ZIP"
+        else
+            echo "No files to zip. Archive not created."
+        fi
+        rm -f "$FILE_LIST"
+    fi
 fi
 
 # --- Exit code control ---
