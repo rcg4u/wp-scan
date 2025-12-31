@@ -19,6 +19,9 @@ EMAIL_ALWAYS="${WP_SCAN_EMAIL_ALWAYS:-0}"
 
 ARG_SITE=""
 
+# WordPress mode (default on). Disable with --no-wordpress
+WP_MODE=1
+
 # Module toggles (default: run all)
 DO_RECENT=1
 DO_SUSPICIOUS=1
@@ -84,6 +87,8 @@ while [ $# -gt 0 ]; do
             LIST=$(echo "$2" | tr ',' ' ')
             for m in $LIST; do clear_module_flag "$m"; done
             shift 2 ;;
+        --no-wordpress)
+            WP_MODE=0; shift ;;
         -h|--help)
             echo "Usage: $0 [--email <addr>] [--email-always] [--email-from <addr>] [--email-subject <text>] /path/to/wordpress/root"
             exit 0 ;;
@@ -112,9 +117,13 @@ if [ ! -d "$SITE_PATH" ]; then
 fi
 
 # Check if it looks like a WordPress installation.
-if [ ! -f "$SITE_PATH/wp-config.php" ]; then
-    echo "Error: wp-config.php not found in '$SITE_PATH'. Is this a WordPress root?"
-    exit 1
+if [ "$WP_MODE" -eq 1 ]; then
+    if [ ! -f "$SITE_PATH/wp-config.php" ]; then
+        echo "Error: wp-config.php not found in '$SITE_PATH'. Is this a WordPress root?"
+        exit 1
+    fi
+else
+    echo "[Info] Non-WordPress mode: skipping wp-config.php check."
 fi
 
 echo "=========================================================================="
@@ -166,6 +175,12 @@ else
     # Fallback: only log file (we'll print it back at the end)
     exec >>"$LOG_FILE" 2>&1
     VERBOSE_TO_STDOUT=0
+fi
+
+# In non-WordPress mode, disable WP-specific modules by default
+if [ "$WP_MODE" -eq 0 ]; then
+    DO_WPVER=0
+    DO_UPLOADS=0
 fi
 
 # --- 1. Check for Recently Modified Files ---
@@ -220,7 +235,7 @@ fi
 
 
 # --- 3. Search for Malicious Code Patterns ---
-if [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ]; then
+if [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_PHPSHELL" -eq 1 ]; then
     echo -e "\n[+] Searching for malicious code patterns in PHP files..."
 fi
 
@@ -245,6 +260,23 @@ if [ "$DO_OBFUSCATED" -eq 1 ]; then
         echo "$OBFUSCATED_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -10
     else
         echo "OK: No obvious obfuscated code found."
+    fi
+fi
+
+if [ "$DO_PHPSHELL" -eq 1 ]; then
+    # Search for known PHP web shell signatures and names
+    echo "  -> Searching for PHP shell signatures (C99, R57, WSO, B374K, FilesMan, etc.)..."
+    PHPSHELL_SIG_PATTERN="C99Shell|c99|R57|r57|WSO|B374K|FilesMan|IndoXploit|WebShell|FilesManager|Symlink"
+    PHPSHELL_MATCH=$(grep -R -l -I --include="*.php" -E "$PHPSHELL_SIG_PATTERN" "$SITE_PATH" 2>/dev/null)
+    # Also check common shell filenames
+    PHPSHELL_NAMES=$(find "$SITE_PATH" -type f \( -iname "*wso*.php" -o -iname "*c99*.php" -o -iname "*r57*.php" -o -iname "*b374k*.php" -o -iname "*filesman*.php" -o -iname "webshell.php" -o -iname "shell.php" \) 2>/dev/null)
+
+    if [ -n "$PHPSHELL_MATCH" ] || [ -n "$PHPSHELL_NAMES" ]; then
+        echo "!!! WARNING: Potential PHP shell indicators found. Review these files:"
+        PHPSHELL_UNIQUE=$( { echo "$PHPSHELL_MATCH"; echo "$PHPSHELL_NAMES"; } | grep -v -E "wp-includes/|wp-admin/" | sort -u )
+        echo "$PHPSHELL_UNIQUE" | head -20
+    else
+        echo "OK: No explicit PHP shell signatures found."
     fi
 fi
 
