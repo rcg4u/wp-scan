@@ -2,7 +2,7 @@
 # ====================================================================
 # Generic WordPress Security Scanner
 #
-# Usage: ./generic_wp_scan.sh [options] /path/to/site/root
+# Usage: ./wp-scan.sh [options] /path/to/site/root
 #
 # Options:
 #   --email <addr>          Send report to this address when warnings found
@@ -32,13 +32,15 @@
 #   --curl / --no-curl
 #   --wpver / --no-wpver
 #   --perms / --no-perms
+#   --immutable / --no-immutable
 #   --verification / --no-verification
 #   --dyn-exec / --no-dyn-exec
 #   --oneliner / --no-oneliner
+#   --wp-cli / --no-wp-cli
 #   --help                  Show usage
 #
-# Modules: recent, suspicious, uploads, backdoor, obfuscation, phpshell, curl, wpver, perms, dyn-exec, oneliner, all
-# Example: ./generic_wp_scan.sh --only recent,uploads --email admin@example.com /var/www/html/site
+# Modules: recent, suspicious, uploads, backdoor, obfuscation, phpshell, curl, wpver, perms, immutable, dyn-exec, oneliner, wp-cli, all
+# Example: ./wp-scan.sh --only recent,uploads --email admin@example.com /var/www/html/site
 # ====================================================================
 
 # --- Script Logic ---
@@ -78,13 +80,15 @@ DO_SUPERGLOBAL=1
 DO_CURL=1
 DO_WPVER=1
 DO_PERMS=1
+DO_IMMUTABLE=1
 DO_VERIFICATION=1
 DO_DYN_EXEC=1
 DO_ONELINER=1
+DO_WP_CLI=1
 MENU_MODE=0
 
 enable_only_defaults() {
-  DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_VERIFICATION=0; DO_DYN_EXEC=0; DO_ONELINER=0
+  DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0
 }
 
 set_module_flag() {
@@ -97,11 +101,13 @@ set_module_flag() {
     curl) DO_CURL=1 ;;
     wpver) DO_WPVER=1 ;;
     perms) DO_PERMS=1 ;;
+    immutable) DO_IMMUTABLE=1 ;;
     verification) DO_VERIFICATION=1 ;;
     dyn-exec) DO_DYN_EXEC=1 ;;
     oneliner) DO_ONELINER=1 ;;
+    wp-cli) DO_WP_CLI=1 ;;
     all)
-      DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_UPLOADS_PHP=1; DO_BACKDOOR=1; DO_OBFUSCATED=1; DO_PHPSHELL=1; DO_HIDDEN=1; DO_SUPERGLOBAL=1; DO_CURL=1; DO_WPVER=1; DO_PERMS=1; DO_VERIFICATION=1; DO_DYN_EXEC=1; DO_ONELINER=1
+      DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_UPLOADS_PHP=1; DO_BACKDOOR=1; DO_OBFUSCATED=1; DO_PHPSHELL=1; DO_HIDDEN=1; DO_SUPERGLOBAL=1; DO_CURL=1; DO_WPVER=1; DO_PERMS=1; DO_IMMUTABLE=1; DO_VERIFICATION=1; DO_DYN_EXEC=1; DO_ONELINER=1; DO_WP_CLI=1
       ;;
   esac
 }
@@ -116,11 +122,13 @@ clear_module_flag() {
     curl) DO_CURL=0 ;;
     wpver) DO_WPVER=0 ;;
     perms) DO_PERMS=0 ;;
+    immutable) DO_IMMUTABLE=0 ;;
     verification) DO_VERIFICATION=0 ;;
     dyn-exec) DO_DYN_EXEC=0 ;;
     oneliner) DO_ONELINER=0 ;;
+    wp-cli) DO_WP_CLI=0 ;;
     all)
-      DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_VERIFICATION=0; DO_DYN_EXEC=0; DO_ONELINER=0
+      DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0
       ;;
   esac
 }
@@ -178,18 +186,22 @@ while [ $# -gt 0 ]; do
     --no-wpver) clear_module_flag wpver; shift ;;
     --perms) set_module_flag perms; shift ;;
     --no-perms) clear_module_flag perms; shift ;;
+    --immutable) set_module_flag immutable; shift ;;
+    --no-immutable) clear_module_flag immutable; shift ;;
     --verification) set_module_flag verification; shift ;;
     --no-verification) clear_module_flag verification; shift ;;
     --dyn-exec) set_module_flag dyn-exec; shift ;;
     --no-dyn-exec) clear_module_flag dyn-exec; shift ;;
     --oneliner) set_module_flag oneliner; shift ;;
     --no-oneliner) clear_module_flag oneliner; shift ;;
+    --wp-cli) set_module_flag wp-cli; shift ;;
+    --no-wp-cli) clear_module_flag wp-cli; shift ;;
     -h|--help)
       echo "Usage: $0 [options] /path/to/site/root"
       echo
       echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --only <modules> --skip <modules> --no-wordpress --sc --json --exit-code <binary|count> --zip <filename.zip> --with-cache --scan-all"
-      echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --uploads-php/--no-uploads-php --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --hidden/--no-hidden --superglobal/--no-superglobal --curl/--no-curl --wpver/--no-wpver --perms/--no-perms --verification/--no-verification --dyn-exec/--no-dyn-exec --oneliner/--no-oneliner"
-      echo "Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, hidden, superglobal, curl, wpver, perms, verification, dyn-exec, oneliner, all"
+      echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --uploads-php/--no-uploads-php --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --hidden/--no-hidden --superglobal/--no-superglobal --curl/--no-curl --wpver/--no-wpver --perms/--no-perms --immutable/--no-immutable --verification/--no-verification --dyn-exec/--no-dyn-exec --oneliner/--no-oneliner --wp-cli/--no-wp-cli"
+      echo "Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, dyn-exec, oneliner, wp-cli, hidden, superglobal, curl, wpver, perms, immutable, all"
       echo
       echo "Examples:"
       echo " $0 --only recent,uploads --email admin@example.com /var/www/html/site"
@@ -255,6 +267,8 @@ if [ "$MENU_MODE" -eq 1 ]; then
   echo "12) Verification files (.well-known & top-level)"
   echo "13) Dynamic execution patterns"
   echo "14) Potential one-liner shells"
+  echo "15) WP-CLI deep checks"
+  echo "16) Immutable files (+i attribute)"
   echo "Select modules to run (e.g., 1,3,8) or press Enter for default (all):"
   read -r USER_SEL
   if [ -n "$USER_SEL" ]; then
@@ -275,6 +289,8 @@ if [ "$MENU_MODE" -eq 1 ]; then
         12) DO_VERIFICATION=1 ;;
         13) DO_DYN_EXEC=1 ;;
         14) DO_ONELINER=1 ;;
+        15) DO_WP_CLI=1 ;;
+        16) DO_IMMUTABLE=1 ;;
       esac
     done
   fi
@@ -303,6 +319,7 @@ if [ "$WP_MODE" -eq 0 ] && [ "$SCAN_ALL" -eq 0 ]; then
   DO_WPVER=0
   DO_UPLOADS=0
   DO_UPLOADS_PHP=0
+  DO_WP_CLI=0
 fi
 
 
@@ -604,6 +621,101 @@ if [ "$DO_PERMS" -eq 1 ]; then
   fi
 fi
 
+# --- 6. Check for Immutable Files ---
+if [ "$DO_IMMUTABLE" -eq 1 ]; then
+  echo -e "\n[+] Checking for immutable files (+i attribute)..."
+  # Check if lsattr command is available
+  if ! command -v lsattr >/dev/null 2>&1; then
+    echo "INFO: 'lsattr' command not found. Skipping immutable file check (requires e2fsprogs)."
+  else
+    # Use find to execute lsattr on all files and grep to filter for the immutable flag.
+    # We only care about regular files, not directories.
+    IMMUTABLE_FILES=$(find "$SITE_PATH" -type f -exec lsattr -d {} \; 2>/dev/null | grep '^^.i' | awk '{print $2}')
+    if [ -n "$IMMUTABLE_FILES" ]; then
+      echo "!!! WARNING: Found immutable files. This is highly suspicious and may indicate a rootkit or backdoor."
+      echo "$IMMUTABLE_FILES"
+      ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$IMMUTABLE_FILES")
+    else
+      echo "OK: No immutable files found."
+    fi
+  fi
+fi
+
+
+# --- 7. WP-CLI Deep Checks ---
+if [ "$DO_WP_CLI" -eq 1 ]; then
+  if ! command -v wp >/dev/null 2>&1; then
+    echo -e "\n[+] WP-CLI checks skipped: 'wp' command not found."
+  else
+    echo -e "\n[+] Running WP-CLI deep checks..."
+    cd "$SITE_PATH" || { echo "Error: Could not change directory to $SITE_PATH"; exit 1; }
+
+    # Check if WP-CLI can run
+    if ! wp cli is-installed --quiet 2>/dev/null; then
+      echo "!!! WARNING: WP-CLI found but not functional for this installation. Skipping WP-CLI checks."
+    else
+      # 7.1 Core Integrity Check
+      echo " -> Checking core file integrity..."
+      CORE_STATUS=$(wp core verify-checksums --format=json 2>/dev/null)
+      if [ $? -ne 0 ]; then
+        echo "!!! WARNING: WordPress core files have been modified or checksums are missing."
+        echo "$CORE_STATUS" | jq -r '.[] | "File: $$.file), Status: $$.status)"' 2>/dev/null || echo "$CORE_STATUS"
+      else
+        echo "OK: Core file integrity verified."
+      fi
+
+      # 7.2 Plugin/Theme Status and Vulnerabilities
+      echo " -> Checking plugin and theme status..."
+      PLUGIN_STATUS=$(wp plugin list --status=inactive --format=json 2>/dev/null)
+      if [ -n "$PLUGIN_STATUS" ] && [ "$PLUGIN_STATUS" != "[]" ]; then
+        echo "!!! WARNING: Inactive plugins found (can be a security risk):"
+        echo "$PLUGIN_STATUS" | jq -r '.[] | " - $$.name) (v$$.version))"' 2>/dev/null || echo "$PLUGIN_STATUS"
+      fi
+      THEME_STATUS=$(wp theme list --status=inactive --format=json 2>/dev/null)
+      if [ -n "$THEME_STATUS" ] && [ "$THEME_STATUS" != "[]" ]; then
+        echo "!!! WARNING: Inactive themes found (should be removed):"
+        echo "$THEME_STATUS" | jq -r '.[] | " - $$.name) (v$$.version))"' 2>/dev/null || echo "$THEME_STATUS"
+      fi
+      if wp cli has-command "plugin vulnerability" 2>/dev/null; then
+        echo " -> Checking for plugin vulnerabilities..."
+        VULN_REPORT=$(wp plugin vulnerability list --format=json 2>/dev/null)
+        VULN_COUNT=$(echo "$VULN_REPORT" | jq length 2>/dev/null || echo 0)
+        if [ "$VULN_COUNT" -gt 0 ]; then
+          echo "!!! WARNING: Found $VULN_COUNT plugin vulnerabilities:"
+          echo "$VULN_REPORT" | jq -r '.[] | " - $$.title) in $$.plugin) ($$.fixed_in // "no fix"))"' 2>/dev/null || echo "$VULN_REPORT"
+        fi
+      fi
+
+      # 7.3 User Security Check
+      echo " -> Checking user security..."
+      ADMIN_USERS=$(wp user list --role=administrator --format=json 2>/dev/null)
+      if [ -n "$ADMIN_USERS" ]; then
+        echo "INFO: Administrator users found:"
+        echo "$ADMIN_USERS" | jq -r '.[] | " - $$.user_login) ($$.user_email))"' 2>/dev/null || echo "$ADMIN_USERS"
+      fi
+      NO_ROLE_USERS=$(wp user list --role= --format=json 2>/dev/null)
+      if [ -n "$NO_ROLE_USERS" ] && [ "$NO_ROLE_USERS" != "[]" ]; then
+        echo "!!! WARNING: Users with no assigned role found:"
+        echo "$NO_ROLE_USERS" | jq -r '.[] | " - $$.user_login) ($$.user_email))"' 2>/dev/null || echo "$NO_ROLE_USERS"
+      fi
+
+      # 7.4 Database Status
+      echo " -> Checking database status..."
+      DB_SIZE=$(wp db size --format=json 2>/dev/null)
+      if [ -n "$DB_SIZE" ]; then
+          echo "INFO: Database size: $(echo "$DB_SIZE" | jq -r '.size_human' 2>/dev/null || echo "$DB_SIZE")"
+      fi
+
+      # 7.5 Suspicious Options
+      echo " -> Checking for suspicious options..."
+      UPLOAD_PATH=$(wp option get upload_path --format=json 2>/dev/null)
+      if [ -n "$UPLOAD_PATH" ] && [ "$UPLOAD_PATH" != "null" ] && [ "$UPLOAD_PATH" != "wp-content/uploads" ]; then
+        echo "!!! WARNING: Custom upload_path detected: $UPLOAD_PATH"
+      fi
+    fi
+  fi
+fi
+
 
 echo -e "\n=========================================================================="
 echo "Scan Complete."
@@ -663,6 +775,8 @@ if [ "$JSON_OUTPUT" -eq 1 ]; then
   VERIF_COUNT=$(count_lines "$VERIFICATION_FILES")
   DYN_EXEC_COUNT=$(count_lines "$FILTERED_DYN_EXEC")
   ONELINER_COUNT=$(count_lines "$FILTERED_ONELINER")
+  IMMUTABLE_COUNT=$(count_lines "$IMMUTABLE_FILES")
+  WP_CLI_COUNT=$(grep -c "!!! WARNING.*WP-CLI" "$LOG_FILE" 2>/dev/null || echo 0)
 
   echo "{"
   echo " \"site\": \"$SITE_PATH\","
@@ -681,7 +795,9 @@ if [ "$JSON_OUTPUT" -eq 1 ]; then
   echo "  \"perms_world_writable\": $PERMS_COUNT,"
   echo "  \"verification_files\": $VERIF_COUNT,"
   echo "  \"dyn_exec\": $DYN_EXEC_COUNT,"
-  echo "  \"oneliner\": $ONELINER_COUNT"
+  echo "  \"oneliner\": $ONELINER_COUNT,"
+  echo "  \"immutable\": $IMMUTABLE_COUNT,"
+  echo "  \"wp_cli\": $WP_CLI_COUNT"
   echo " }"
   echo "}"
 fi
