@@ -1,27 +1,33 @@
+Of course. Here is the updated `README.md` file, incorporating the new `dyn-exec` and `oneliner` modules we added to the script. I've updated the feature list, module triggers, interactive menu, JSON output example, and added a new entry to the changelog.
+
+---
+
 # wp-scan
 
 Generic WordPress and site security scanner (Bash) that surfaces suspicious changes and high‑risk patterns quickly. Runs on Linux/WSL and scans a target webroot for common indicators of compromise.
 
 ## Features
 
-- Recent changes: list files modified in the last 60 minutes
-- Suspicious names: flag common backdoor file/dir names (c99, r57, wso, adminer.php, etc.)
-- Uploads sanity: detect non‑month directories under `wp-content/uploads`
-- Uploads PHP: flag any `*.php` files inside `wp-content/uploads` (often malicious)
-- Backdoor signatures: find usage of `eval`, `base64_decode`, `shell_exec`, `system`, `exec`, `passthru`, etc.
-- Obfuscation: find `base64_decode`, `gzinflate`, `str_rot13`, `strrev` patterns
-- PHP shells: detect known signatures and common filenames (C99, R57, WSO, B374K, FilesMan, …)
-- Hidden dotfiles: flag `.*` files (excluding VCS and `.well-known`) that may hide config/secrets
-- Superglobal backdoors: spot `$_GET/$_POST/$_REQUEST/$_COOKIE` driving `eval/exec/system/...`
-- cURL calls: list files that make cURL requests (frequent in data exfil/backdoors)
-- WordPress version: report detected WP version for manual CVE checks
-- Permissions: surface world‑writable files outside cache/uploads
-- Verification files: detect top‑level verification HTML and any files in `.well-known` (fixes prior search)
-- Email notifications: send the full report via mail/sendmail/msmtp when warnings are found
-- JSON output: machine‑readable summary for automation
-- Exit code control: choose between binary 0/1 or counts (capped to 254)
-- Interactive menu: choose which modules to run without CLI flags
-- Non‑WordPress mode: skip WP‑specific checks safely for generic sites
+- **Recent changes**: list files modified in the last 60 minutes
+- **Suspicious names**: flag common backdoor file/dir names (c99, r57, wso, adminer.php, etc.)
+- **Uploads sanity**: detect non‑month directories under `wp-content/uploads`
+- **Uploads PHP**: flag any `*.php` files inside `wp-content/uploads` (often malicious)
+- **Backdoor signatures**: find usage of `eval`, `base64_decode`, `shell_exec`, `system`, `exec`, `passthru`, etc.
+- **Obfuscation**: find `base64_decode`, `gzinflate`, `str_rot13`, `strrev`, `assert`, `create_function` patterns
+- **PHP shells**: detect known signatures and common filenames (C99, R57, WSO, B374K, FilesMan, …)
+- **Dynamic execution**: detect patterns where function names are built from variables or strings to evade static analysis
+- **One-liner shells**: find very small PHP files (< 5 lines) that contain dangerous functions, a common backdoor tactic
+- **Hidden dotfiles**: flag `.*` files (excluding VCS and `.well-known`) that may hide config/secrets
+- **Superglobal backdoors**: spot `$_GET/$_POST/$_REQUEST/$_COOKIE` driving `eval/exec/system/...`
+- **cURL calls**: list files that make cURL requests (frequent in data exfil/backdoors)
+- **WordPress version**: report detected WP version for manual CVE checks
+- **Permissions**: surface world‑writable files outside cache/uploads
+- **Verification files**: detect top‑level verification HTML and any files in `.well-known` (fixes prior search)
+- **Email notifications**: send the full report via mail/sendmail/msmtp when warnings are found
+- **JSON output**: machine‑readable summary for automation
+- **Exit code control**: choose between binary 0/1 or counts (capped to 254)
+- **Interactive menu**: choose which modules to run without CLI flags
+- **Non‑WordPress mode**: skip WP‑specific checks safely for generic sites
 
 ## Requirements
 
@@ -51,12 +57,10 @@ If no arguments are provided, usage is shown.
 - `--json`: output a minimal JSON summary of counts by module and overall status
 - `--exit-code <binary|count>`: exit 0/1 in binary mode or return the warning count (capped to 254)
 - `--with-cache`: include `wp-content/cache` in the recent files scan (excluded by default)
-- `--zip <filename.zip>`: create a zip archive containing flagged files (recent changes, PHP shells, backdoor/obfuscation matches, hidden dotfiles, superglobal patterns, verification files, uploads PHP, world‑writable, filtered cURL). Entries use absolute paths, and a `wp-scan-manifest.txt` is included listing all full paths for easy reference.
+- `--zip <filename.zip>`: create a zip archive containing flagged files (recent changes, PHP shells, backdoor/obfuscation matches, hidden dotfiles, superglobal patterns, verification files, uploads PHP, world‑writable, filtered cURL, dynamic execution, one-liner shells). Entries use absolute paths, and a `wp-scan-manifest.txt` is included listing all full paths for easy reference.
 - `--scan-all`: force-enable all modules for this run (overrides default non‑WP exclusions)
-- `--no-cache`: exclude `wp-content/cache` from the recent files scan (cache changes are noisy)
 
 Environment variables for email:
-
 - `WP_SCAN_EMAIL_TO`, `WP_SCAN_EMAIL_FROM`, `WP_SCAN_EMAIL_SUBJECT`, `WP_SCAN_EMAIL_ALWAYS`
 
 ### Module triggers
@@ -68,6 +72,8 @@ Environment variables for email:
 - `--backdoor` / `--no-backdoor`
 - `--obfuscation` / `--no-obfuscation`
 - `--phpshell` / `--no-phpshell`
+- `--dyn-exec` / `--no-dyn-exec`
+- `--oneliner` / `--no-oneliner`
 - `--hidden` / `--no-hidden`
 - `--superglobal` / `--no-superglobal`
 - `--curl` / `--no-curl`
@@ -75,7 +81,7 @@ Environment variables for email:
 - `--perms` / `--no-perms`
 - `--verification` / `--no-verification`
 
-Modules: `recent`, `suspicious`, `uploads`, `uploads-php`, `backdoor`, `obfuscation`, `phpshell`, `hidden`, `superglobal`, `curl`, `wpver`, `perms`, `all`
+Modules: `recent`, `suspicious`, `uploads`, `uploads-php`, `backdoor`, `obfuscation`, `phpshell`, `dyn-exec`, `oneliner`, `hidden`, `superglobal`, `curl`, `wpver`, `perms`, `all`
 
 ### Interactive menu
 
@@ -93,6 +99,8 @@ Run with `--menu` and enter selections like `1,3,8`:
 10) Hidden dotfiles
 11) Superglobal backdoors
 12) Verification files (.well-known & top-level)
+13) Dynamic execution patterns
+14) Potential one-liner shells
 
 ### JSON output
 
@@ -100,7 +108,6 @@ When `--json` is set, a compact JSON summary like below is printed:
 
 ```json
 {
-
   "site": "/var/www/html/site",
   "status": "WARNINGS",
   "warnings": 3,
@@ -111,6 +118,8 @@ When `--json` is set, a compact JSON summary like below is printed:
     "backdoor": 1,
     "obfuscation": 0,
     "phpshell": 0,
+    "dyn_exec": 1,
+    "oneliner": 0,
     "hidden": 0,
     "superglobal": 0,
     "curl": 0,
@@ -160,7 +169,8 @@ bash wp-scan.sh --zip /var/www/html/scan-flags.zip /var/www/html/site
 
 ## Changelog
 
-- 2025‑12‑31: Added uploads‑PHP, hidden dotfiles, superglobal backdoor scan, JSON summary output, exit‑code control, and fixed verification files search. Tagged: `features/all-suggested-2025-12-31`.
+- **2026‑01‑01**: Added `dyn-exec` and `oneliner` modules to detect more advanced and unknown PHP shells. Fixed output issues where file lists were not being displayed for several modules. Tagged: `features/advanced-shell-detection-2026-01-01`.
+- **2025‑12‑31**: Added uploads‑PHP, hidden dotfiles, superglobal backdoor scan, JSON summary output, exit‑code control, and fixed verification files search. Tagged: `features/all-suggested-2025-12-31`.
 
 ## License
 
