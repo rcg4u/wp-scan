@@ -615,6 +615,30 @@ run_modules() {
     scan_wp_cli
 }
 
+# Run only the modules currently toggled on (used by --menu)
+run_selected_modules() {
+    [ "$DO_RECENT" -eq 1 ] && scan_recent_files
+    [ "$DO_SUSPICIOUS" -eq 1 ] && scan_suspicious_names
+    [ "$DO_UPLOADS" -eq 1 ] && scan_uploads
+    [ "$DO_UPLOADS_PHP" -eq 1 ] && scan_uploads_php
+    [ "$DO_VERIFICATION" -eq 1 ] && scan_verification_files
+    [ "$DO_ACCESS_LOGS" -eq 1 ] && scan_access_logs
+
+    # Pattern scans: scan_malicious_code internally checks its own sub-flags,
+    # but we only invoke it if at least one related toggle is enabled.
+    if [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_PHPSHELL" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ]; then
+        scan_malicious_code
+    fi
+
+    [ "$DO_HIDDEN" -eq 1 ] && scan_hidden_files
+    [ "$DO_SUPERGLOBAL" -eq 1 ] && scan_superglobal
+    [ "$DO_CURL" -eq 1 ] && scan_curl
+    [ "$DO_WPVER" -eq 1 ] && scan_wp_version
+    [ "$DO_PERMS" -eq 1 ] && scan_permissions
+    [ "$DO_IMMUTABLE" -eq 1 ] && scan_immutable
+    [ "$DO_WP_CLI" -eq 1 ] && scan_wp_cli
+}
+
 # --- SCRIPT ENTRY POINT ---
 echo "=========================================================================="
 echo "Starting Generic WordPress Security Scan for: $SITE_PATH"
@@ -623,7 +647,12 @@ echo "==========================================================================
 if [ "${MENU_MODE:-0}" -eq 1 ]; then
     interactive_menu
 fi
-run_modules
+
+if [ "${MENU_MODE:-0}" -eq 1 ]; then
+    run_selected_modules
+else
+    run_modules
+fi
 echo -e "\n=========================================================================="
 echo "Scan Complete."
 echo "=========================================================================="
