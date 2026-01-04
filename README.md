@@ -1,7 +1,3 @@
-Of course. Here is the fully updated `README.md` file, incorporating the new WP-CLI and immutable file scanning modules, along with all previous features. I've updated the feature list, requirements, module options, interactive menu, JSON output, and added a new entry to the changelog.
-
----
-
 # wp-scan
 
 Generic WordPress and site security scanner (Bash) that surfaces suspicious changes and high‑risk patterns quickly. Runs on Linux/WSL and scans a target webroot for common indicators of compromise.
