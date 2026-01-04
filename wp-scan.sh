@@ -34,6 +34,7 @@
 #   --perms / --no-perms
 #   --immutable / --no-immutable
 #   --verification / --no-verification
+#   --access-logs / --no-access-logs
 #   --dyn-exec / --no-dyn-exec
 #   --oneliner / --no-oneliner
 #   --wp-cli / --no-wp-cli
@@ -82,13 +83,14 @@ DO_WPVER=1
 DO_PERMS=1
 DO_IMMUTABLE=1
 DO_VERIFICATION=1
+DO_ACCESS_LOGS=1
 DO_DYN_EXEC=1
 DO_ONELINER=1
 DO_WP_CLI=1
 MENU_MODE=0
 
 enable_only_defaults() {
-  DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0
+  DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_ACCESS_LOGS=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0
 }
 
 set_module_flag() {
@@ -103,11 +105,12 @@ set_module_flag() {
     perms) DO_PERMS=1 ;;
     immutable) DO_IMMUTABLE=1 ;;
     verification) DO_VERIFICATION=1 ;;
+    access-logs) DO_ACCESS_LOGS=1 ;;
     dyn-exec) DO_DYN_EXEC=1 ;;
     oneliner) DO_ONELINER=1 ;;
     wp-cli) DO_WP_CLI=1 ;;
     all)
-      DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_UPLOADS_PHP=1; DO_BACKDOOR=1; DO_OBFUSCATED=1; DO_PHPSHELL=1; DO_HIDDEN=1; DO_SUPERGLOBAL=1; DO_CURL=1; DO_WPVER=1; DO_PERMS=1; DO_IMMUTABLE=1; DO_VERIFICATION=1; DO_DYN_EXEC=1; DO_ONELINER=1; DO_WP_CLI=1
+      DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_UPLOADS_PHP=1; DO_BACKDOOR=1; DO_OBFUSCATED=1; DO_PHPSHELL=1; DO_HIDDEN=1; DO_SUPERGLOBAL=1; DO_CURL=1; DO_WPVER=1; DO_PERMS=1; DO_IMMUTABLE=1; DO_VERIFICATION=1; DO_ACCESS_LOGS=1; DO_DYN_EXEC=1; DO_ONELINER=1; DO_WP_CLI=1
       ;;
   esac
 }
@@ -124,11 +127,12 @@ clear_module_flag() {
     perms) DO_PERMS=0 ;;
     immutable) DO_IMMUTABLE=0 ;;
     verification) DO_VERIFICATION=0 ;;
+    access-logs) DO_ACCESS_LOGS=0 ;;
     dyn-exec) DO_DYN_EXEC=0 ;;
     oneliner) DO_ONELINER=0 ;;
     wp-cli) DO_WP_CLI=0 ;;
     all)
-      DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0
+      DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_ACCESS_LOGS=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0
       ;;
   esac
 }
@@ -190,6 +194,8 @@ while [ $# -gt 0 ]; do
     --no-immutable) clear_module_flag immutable; shift ;;
     --verification) set_module_flag verification; shift ;;
     --no-verification) clear_module_flag verification; shift ;;
+  --access-logs) set_module_flag access-logs; shift ;;
+  --no-access-logs) clear_module_flag access-logs; shift ;;
     --dyn-exec) set_module_flag dyn-exec; shift ;;
     --no-dyn-exec) clear_module_flag dyn-exec; shift ;;
     --oneliner) set_module_flag oneliner; shift ;;
@@ -200,8 +206,8 @@ while [ $# -gt 0 ]; do
       echo "Usage: $0 [options] /path/to/site/root"
       echo
       echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --only <modules> --skip <modules> --no-wordpress --sc --json --exit-code <binary|count> --zip <filename.zip> --with-cache --scan-all"
-      echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --uploads-php/--no-uploads-php --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --hidden/--no-hidden --superglobal/--no-superglobal --curl/--no-curl --wpver/--no-wpver --perms/--no-perms --immutable/--no-immutable --verification/--no-verification --dyn-exec/--no-dyn-exec --oneliner/--no-oneliner --wp-cli/--no-wp-cli"
-      echo "Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, dyn-exec, oneliner, wp-cli, hidden, superglobal, curl, wpver, perms, immutable, all"
+  echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --uploads-php/--no-uploads-php --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --hidden/--no-hidden --superglobal/--no-superglobal --curl/--no-curl --wpver/--no-wpver --perms/--no-perms --immutable/--no-immutable --verification/--no-verification --access-logs/--no-access-logs --dyn-exec/--no-dyn-exec --oneliner/--no-oneliner --wp-cli/--no-wp-cli"
+  echo "Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, dyn-exec, oneliner, wp-cli, hidden, superglobal, curl, wpver, perms, immutable, verification, access-logs, all"
       echo
       echo "Examples:"
       echo " $0 --only recent,uploads --email admin@example.com /var/www/html/site"
@@ -253,22 +259,23 @@ echo "==========================================================================
 # Optional interactive module selection
 if [ "$MENU_MODE" -eq 1 ]; then
   echo "Interactive Module Selection"
-  echo " 1) Recently modified files"
-  echo " 2) Suspicious file/directory names"
-  echo " 3) Non-month directories in uploads"
-  echo " 4) High-risk backdoor functions (PHP)"
-  echo " 5) Obfuscated code (PHP)"
-  echo " 6) cURL calls (PHP)"
-  echo " 7) WordPress version"
-  echo " 8) File permissions"
-  echo " 9) PHP files inside uploads"
-  echo "10) Hidden dotfiles"
-  echo "11) Superglobal backdoor patterns"
-  echo "12) Verification files (.well-known & top-level)"
-  echo "13) Dynamic execution patterns"
-  echo "14) Potential one-liner shells"
-  echo "15) WP-CLI deep checks"
-  echo "16) Immutable files (+i attribute)"
+  echo " 1) Recently modified files                      (--recent)"
+  echo " 2) Suspicious file/directory names               (--suspicious)"
+  echo " 3) Non-month directories in uploads              (--uploads)"
+  echo " 4) High-risk backdoor functions (PHP)            (--backdoor)"
+  echo " 5) Obfuscated code (PHP)                         (--obfuscation)"
+  echo " 6) cURL calls (PHP)                              (--curl)"
+  echo " 7) WordPress version                             (--wpver)"
+  echo " 8) File permissions                              (--perms)"
+  echo " 9) PHP files inside uploads                      (--uploads-php)"
+  echo "10) Hidden dotfiles                               (--hidden)"
+  echo "11) Superglobal backdoor patterns                 (--superglobal)"
+  echo "12) Verification files (.well-known & top-level)  (--verification)"
+  echo "13) Access logs scan (/home/<user>/logs, etc.)    (--access-logs)"
+  echo "14) Dynamic execution patterns                    (--dyn-exec)"
+  echo "15) Potential one-liner shells                    (--oneliner)"
+  echo "16) WP-CLI deep checks                            (--wp-cli)"
+  echo "17) Immutable files (+i attribute)                (--immutable)"
   echo "Select modules to run (e.g., 1,3,8) or press Enter for default (all):"
   read -r USER_SEL
   if [ -n "$USER_SEL" ]; then
@@ -287,10 +294,11 @@ if [ "$MENU_MODE" -eq 1 ]; then
         10) DO_HIDDEN=1 ;;
         11) DO_SUPERGLOBAL=1 ;;
         12) DO_VERIFICATION=1 ;;
-        13) DO_DYN_EXEC=1 ;;
-        14) DO_ONELINER=1 ;;
-        15) DO_WP_CLI=1 ;;
-        16) DO_IMMUTABLE=1 ;;
+        13) DO_ACCESS_LOGS=1 ;;
+        14) DO_DYN_EXEC=1 ;;
+        15) DO_ONELINER=1 ;;
+        16) DO_WP_CLI=1 ;;
+        17) DO_IMMUTABLE=1 ;;
       esac
     done
   fi
@@ -365,8 +373,8 @@ if [ "$DO_UPLOADS" -eq 1 ]; then
     FAKE_MONTH_DIRS=""
     find "$UPLOADS_DIR" -maxdepth 2 -type d -name "[0-9]*" -print 2>/dev/null | while IFS= read -r DIR; do
       BASENAME=$(basename "$DIR")
-      # Corrected regex for months 01-12
-      if [[ "$BASENAME" =~ ^^[0-9]+$ ]] && ! [[ "$BASENAME" =~ ^^[1-9]$|^1^[0-2]$ ]]; then
+      # months are typically 01-12
+      if [[ "$BASENAME" =~ ^[0-9]+$ ]] && ! [[ "$BASENAME" =~ ^(0[1-9]|1[0-2])$ ]]; then
         echo "$DIR"
       fi
     done | sort > "${FAKE_MONTH_DIRS_FILE:=$(mktemp)}"
@@ -397,13 +405,109 @@ fi
 
 # Check for any verification files (Google, Bing, Yandex, etc.)
 if [ "$DO_VERIFICATION" -eq 1 ]; then
-  VERIFICATION_FILES=$( { find "$SITE_PATH" -maxdepth 1 -type f $$ -name "google*.html" -o -name "bing*.html" -o -name "yandex*.html" $$ 2>/dev/null ; find "$SITE_PATH/.well-known" -type f 2>/dev/null ; } 2>/dev/null )
+  VERIFICATION_FILES=$( { find "$SITE_PATH" -maxdepth 1 -type f \( -name "google*.html" -o -name "bing*.html" -o -name "yandex*.html" \) 2>/dev/null ; find "$SITE_PATH/.well-known" -type f 2>/dev/null ; } 2>/dev/null )
   if [ -n "$VERIFICATION_FILES" ]; then
     echo "!!! WARNING: Found verification files. These could be for unauthorized ownership claims:"
     echo "$VERIFICATION_FILES"
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$VERIFICATION_FILES")
   else
     echo "OK: No verification files found."
+  fi
+fi
+
+
+# --- Access logs scan (home directory access-logs + compressed logs) ---
+if [ "$DO_ACCESS_LOGS" -eq 1 ]; then
+  echo -e "\n[+] Scanning access logs under /home/* (access-logs + logs) for suspicious requests..."
+
+  ACCESS_LOG_FINDINGS=""
+  ACCESS_LOG_FILES=""
+
+  # If the scanned site is under /home/<user>/public_html, prefer that user's log folders.
+  ACCESS_LOG_USER=""
+  if [[ "$SITE_PATH" =~ ^/home/([^/]+)/public_html(/|$) ]]; then
+    ACCESS_LOG_USER="${BASH_REMATCH[1]}"
+  fi
+
+  # Helper: scan a plain text log file
+  scan_plain_access_log() {
+    local f="$1"
+    [ -f "$f" ] || return 0
+    # Only text-ish files; if grep thinks it's binary, skip.
+    if grep -Iq . "$f" 2>/dev/null; then
+      # A small but useful set of high-signal patterns.
+      local pat
+      pat="(\?[^ ]*(cmd=|exec=|system=|shell=|base64|eval|assert|GLOBALS|_POST\[|_GET\[))|(/(wp-admin|wp-login\.php)\.php)|(/\.env)|(/wp-config\.php)|(/xmlrpc\.php)|(/\.git/)|(/cgi-bin/)|((/|%2f)(c99|r57|wso|b374k)[^ ]*\.php)|((/|%2f)shell[^ ]*\.php)|((/|%2f)webshell[^ ]*\.php)|((union[+%20]+select|information_schema|sleep\(|benchmark\()|((/|%2f)etc(/|%2f)passwd)|\b(base64_decode|gzinflate|str_rot13|php://input)\b)"
+      local hits
+      hits=$(grep -n -E -i "$pat" "$f" 2>/dev/null | head -50)
+      if [ -n "$hits" ]; then
+        ACCESS_LOG_FILES=$(printf "%s\n%s\n" "$ACCESS_LOG_FILES" "$f")
+        ACCESS_LOG_FINDINGS=$(printf "%s\n=== %s ===\n%s\n" "$ACCESS_LOG_FINDINGS" "$f" "$hits")
+      fi
+    fi
+  }
+
+  # Helper: scan a gzipped log (gunzip -c)
+  scan_gz_access_log() {
+    local f="$1"
+    [ -f "$f" ] || return 0
+    command -v gzip >/dev/null 2>&1 || return 0
+    local pat
+    pat="(\?[^ ]*(cmd=|exec=|system=|shell=|base64|eval|assert|GLOBALS|_POST\[|_GET\[))|(/(wp-admin|wp-login\.php)\.php)|(/\.env)|(/wp-config\.php)|(/xmlrpc\.php)|(/\.git/)|(/cgi-bin/)|((/|%2f)(c99|r57|wso|b374k)[^ ]*\.php)|((/|%2f)shell[^ ]*\.php)|((/|%2f)webshell[^ ]*\.php)|((union[+%20]+select|information_schema|sleep\(|benchmark\()|((/|%2f)etc(/|%2f)passwd)|\b(base64_decode|gzinflate|str_rot13|php://input)\b)"
+    local hits
+    hits=$(gzip -cd -- "$f" 2>/dev/null | grep -n -E -i "$pat" | head -50)
+    if [ -n "$hits" ]; then
+      ACCESS_LOG_FILES=$(printf "%s\n%s\n" "$ACCESS_LOG_FILES" "$f")
+      ACCESS_LOG_FINDINGS=$(printf "%s\n=== %s ===\n%s\n" "$ACCESS_LOG_FINDINGS" "$f" "$hits")
+    fi
+  }
+
+  if [ -d "/home" ]; then
+    if [ -n "$ACCESS_LOG_USER" ]; then
+      ACCESS_LOG_BASE="/home/$ACCESS_LOG_USER"
+      # 1) /home/<user>/access-logs (typically uncompressed)
+      if [ -d "$ACCESS_LOG_BASE/access-logs" ]; then
+        while IFS= read -r lf; do
+          [ -z "$lf" ] && continue
+          scan_plain_access_log "$lf"
+        done < <(find "$ACCESS_LOG_BASE/access-logs" -maxdepth 1 -type f 2>/dev/null | head -500)
+      fi
+
+      # 2) /home/<user>/logs (often compressed)
+      if [ -d "$ACCESS_LOG_BASE/logs" ]; then
+        while IFS= read -r lf; do
+          [ -z "$lf" ] && continue
+          case "$lf" in
+            *.gz) scan_gz_access_log "$lf" ;;
+            *) scan_plain_access_log "$lf" ;;
+          esac
+        done < <(find "$ACCESS_LOG_BASE/logs" -maxdepth 1 -type f 2>/dev/null | head -500)
+      fi
+    else
+      # Fallback: scan all /home/* trees
+      while IFS= read -r lf; do
+        [ -z "$lf" ] && continue
+        scan_plain_access_log "$lf"
+      done < <(find /home -maxdepth 3 -type f -path "*/access-logs/*" 2>/dev/null | head -500)
+
+      while IFS= read -r lf; do
+        [ -z "$lf" ] && continue
+        case "$lf" in
+          *.gz) scan_gz_access_log "$lf" ;;
+          *) scan_plain_access_log "$lf" ;;
+        esac
+      done < <(find /home -maxdepth 3 -type f -path "*/logs/*" 2>/dev/null | head -500)
+    fi
+  fi
+
+  ACCESS_LOG_FILES=$(printf "%s\n" "$ACCESS_LOG_FILES" | sed '/^\s*$/d' | sort -u)
+
+  if [ -n "$ACCESS_LOG_FINDINGS" ]; then
+    echo "!!! WARNING: Suspicious access log requests found (showing first hits per file):"
+    echo "$ACCESS_LOG_FINDINGS" | head -200
+    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$ACCESS_LOG_FILES")
+  else
+    echo "OK: No suspicious access log patterns found in /home/* access logs."
   fi
 fi
 
@@ -773,6 +877,7 @@ if [ "$JSON_OUTPUT" -eq 1 ]; then
   CURL_COUNT=$(count_lines "$FILTERED_CURL")
   PERMS_COUNT=$(count_lines "$WRITABLE_FILES")
   VERIF_COUNT=$(count_lines "$VERIFICATION_FILES")
+  ACCESS_LOG_COUNT=$(count_lines "$ACCESS_LOG_FILES")
   DYN_EXEC_COUNT=$(count_lines "$FILTERED_DYN_EXEC")
   ONELINER_COUNT=$(count_lines "$FILTERED_ONELINER")
   IMMUTABLE_COUNT=$(count_lines "$IMMUTABLE_FILES")
@@ -794,6 +899,7 @@ if [ "$JSON_OUTPUT" -eq 1 ]; then
   echo "  \"curl\": $CURL_COUNT,"
   echo "  \"perms_world_writable\": $PERMS_COUNT,"
   echo "  \"verification_files\": $VERIF_COUNT,"
+  echo "  \"access_logs\": $ACCESS_LOG_COUNT,"
   echo "  \"dyn_exec\": $DYN_EXEC_COUNT,"
   echo "  \"oneliner\": $ONELINER_COUNT,"
   echo "  \"immutable\": $IMMUTABLE_COUNT,"
