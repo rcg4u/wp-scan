@@ -391,13 +391,22 @@ if [ "$DO_UPLOADS" -eq 1 ]; then
 
     # New: Flag any PHP files within uploads (often malicious)
     if [ "$DO_UPLOADS_PHP" -eq 1 ]; then
-      UPLOADS_PHP_FILES=$(find "$UPLOADS_DIR" -type f -name "*.php" 2>/dev/null)
+      # Catch common executable PHP-like extensions used for bypasses.
+      UPLOADS_PHP_FILES=$(find "$UPLOADS_DIR" -type f \( -iname "*.php" -o -iname "*.phtml" -o -iname "*.php5" -o -iname "*.php7" -o -iname "*.phar" -o -iname "*.inc" \) 2>/dev/null)
       if [ -n "$UPLOADS_PHP_FILES" ]; then
-        echo "!!! WARNING: Found PHP files inside uploads (should be media only):"
+        echo "!!! WARNING: Found executable PHP-like files inside uploads (should be media only):"
         echo "$UPLOADS_PHP_FILES"
         ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$UPLOADS_PHP_FILES")
       else
         echo "OK: No PHP files found inside uploads."
+      fi
+
+      # Also flag common double-extension tricks like image.jpg.php
+      UPLOADS_DOUBLE_EXT=$(find "$UPLOADS_DIR" -type f \( -iname "*.jpg.php" -o -iname "*.jpeg.php" -o -iname "*.png.php" -o -iname "*.gif.php" -o -iname "*.webp.php" -o -iname "*.pdf.php" -o -iname "*.txt.php" \) 2>/dev/null)
+      if [ -n "$UPLOADS_DOUBLE_EXT" ]; then
+        echo "!!! WARNING: Found double-extension files in uploads (e.g. image.jpg.php):"
+        echo "$UPLOADS_DOUBLE_EXT" | head -50
+        ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$UPLOADS_DOUBLE_EXT")
       fi
     fi
   fi
@@ -520,7 +529,8 @@ fi
 # Search for common backdoor functions
 if [ "$DO_BACKDOOR" -eq 1 ]; then
   echo " -> Searching for high-risk backdoor functions..."
-  BACKDOOR_PATTERN="eval\\s*$$|base64_decode\\s*$$|shell_exec\\s*$$|passthru\\s*$$|system\\s*$$|exec\\s*$$"
+  # Match actual function calls like eval( ... ). Word boundaries reduce noise.
+  BACKDOOR_PATTERN="\\b(eval|base64_decode|shell_exec|passthru|system|exec|popen|proc_open|assert)\\b\\s*\\("
   BACKDOOR_MATCH=$(grep -R -l -i --include="*.php" -E "$BACKDOOR_PATTERN" "$SITE_PATH" 2>/dev/null)
   if [ -n "$BACKDOOR_MATCH" ]; then
     echo "!!! WARNING: Found high-risk functions. Review these files:"
@@ -544,7 +554,7 @@ fi
 # Search for obfuscated code patterns
 if [ "$DO_OBFUSCATED" -eq 1 ]; then
   echo " -> Searching for obfuscated code (base64, gzinflate, str_rot13, etc.)..."
-  OBFUSCATED_PATTERN="base64_decode|gzinflate$$|str_rot13$$|strrev$$|str_replace$$|preg_replace.*\/e|assert$$|create_function$$"
+  OBFUSCATED_PATTERN="\\b(base64_decode|gzinflate|gzuncompress|gzdecode|str_rot13|strrev|str_replace|rawurldecode|urldecode|pack\\s*\\(\\s*['\"]H\\*['\"]|openssl_decrypt|preg_replace.*\\/e|assert|create_function)\\b"
   OBFUSCATED_MATCH=$(grep -R -l -i --include="*.php" -E "$OBFUSCATED_PATTERN" "$SITE_PATH" 2>/dev/null)
   if [ -n "$OBFUSCATED_MATCH" ]; then
     echo "!!! WARNING: Found potentially obfuscated code. Review these files:"
@@ -568,7 +578,8 @@ fi
 if [ "$DO_PHPSHELL" -eq 1 ]; then
   # Search for known PHP web shell signatures and names
   echo " -> Searching for PHP shell signatures (C99, R57, WSO, B374K, FilesMan, etc.)..."
-  PHPSHELL_SIG_PATTERN="C99Shell|c99|R57|r57|WSO|B374K|FilesMan|IndoXploit|WebShell|FilesManager|Symlink|bypass|shell|cmd|backdoor|encoded by|gaza|hacker|priv8"
+  # Classic signatures + common shell UI/feature strings.
+  PHPSHELL_SIG_PATTERN="C99Shell|\\bc99\\b|R57|\\br57\\b|WSO|B374K|FilesMan|IndoXploit|WebShell|FilesManager|File\\s*manager|Upload\\s*file|Download\\s*file|Symlink|php_uname|posix_geteuid|posix_getpwuid|\\bwhoami\\b|\\buname\\b|\\bid\\b|\\bpriv8\\b|cmd\\s*="
   PHPSHELL_MATCH=$(grep -R -l -I --include="*.php" -E "$PHPSHELL_SIG_PATTERN" "$SITE_PATH" 2>/dev/null)
   # Also check common shell filenames
   PHPSHELL_NAMES=$(find "$SITE_PATH" -type f $$ -iname "*wso*.php" -o -iname "*c99*.php" -o -iname "*r57*.php" -o -iname "*b374k*.php" -o -iname "*filesman*.php" -o -iname "webshell.php" -o -iname "shell.php" $$ 2>/dev/null)
@@ -593,12 +604,146 @@ if [ "$DO_PHPSHELL" -eq 1 ]; then
   else
     echo "OK: No explicit PHP shell signatures found."
   fi
+
+  # ---- Additional PHP shell heuristics (higher confidence, lower false positives) ----
+
+  echo " -> Searching for decode→exec chains (decoder + exec primitive in same file)..."
+  DECODER_PATTERN="\\b(base64_decode|gzinflate|gzuncompress|gzdecode|str_rot13|strrev|rawurldecode|urldecode|pack\\s*\\(\\s*['\"]H\\*['\"]|openssl_decrypt)\\b"
+  EXEC_PATTERN="\\b(eval|assert|system|exec|shell_exec|passthru|popen|proc_open|preg_replace)\\b"
+  DECODE_HITS=$(grep -R -l -I --include="*.php" -E "$DECODER_PATTERN" "$SITE_PATH" 2>/dev/null)
+  if [ -n "$DECODE_HITS" ]; then
+    DECODE_EXEC_FILES=$(printf "%s\n" "$DECODE_HITS" | while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      if grep -q -I -E "$EXEC_PATTERN" "$f" 2>/dev/null; then
+        echo "$f"
+      fi
+    done | sort -u)
+  else
+    DECODE_EXEC_FILES=""
+  fi
+  if [ -n "$DECODE_EXEC_FILES" ]; then
+    echo "!!! WARNING: Found decoder + exec primitive in the same file (common webshell pattern):"
+    FILTERED_DECODE_EXEC=$(printf "%s\n" "$DECODE_EXEC_FILES" | grep -v -E "wp-includes/|wp-admin/" | head -20)
+    echo "$FILTERED_DECODE_EXEC"
+    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_DECODE_EXEC")
+    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+      echo " -> Showing matched lines (decoder/exec), first 3 per file:"
+      printf "%s\n" "$FILTERED_DECODE_EXEC" | while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        echo "----- $f -----"
+        grep -n -I -E "($DECODER_PATTERN|$EXEC_PATTERN)" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+      done
+    fi
+  else
+    echo "OK: No decoder+exec chain hits."
+  fi
+
+  echo " -> Searching for dangerous wrappers (php://input, data://, phar://, expect://)..."
+  WRAPPER_PATTERN="php:\\/\\/input|data:\\/\\/text|phar:\\/\\/|expect:\\/\\/"
+  WRAPPER_MATCH=$(grep -R -l -I --include="*.php" -E "$WRAPPER_PATTERN" "$SITE_PATH" 2>/dev/null)
+  if [ -n "$WRAPPER_MATCH" ]; then
+    echo "!!! WARNING: Found suspicious stream wrapper usage (often used by loaders/stagers):"
+    FILTERED_WRAPPER=$(printf "%s\n" "$WRAPPER_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -20)
+    echo "$FILTERED_WRAPPER"
+    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_WRAPPER")
+    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+      echo " -> Showing matched lines with line numbers (first 3 matches per file):"
+      printf "%s\n" "$FILTERED_WRAPPER" | while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        echo "----- $f -----"
+        grep -n -I -E "$WRAPPER_PATTERN" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+      done
+    fi
+  else
+    echo "OK: No suspicious wrapper usage found."
+  fi
+
+  echo " -> Searching for stealth toggles (error_reporting(0), set_time_limit(0), @eval, etc.)..."
+  STEALTH_PATTERN="error_reporting\\s*\\(\\s*0\\s*\\)|set_time_limit\\s*\\(\\s*0\\s*\\)|ini_set\\s*\\(\\s*['\"]display_errors['\"]\\s*,\\s*0\\s*\\)|@\\s*(eval|assert|system|exec|shell_exec|passthru)\\b"
+  STEALTH_MATCH=$(grep -R -l -I --include="*.php" -E "$STEALTH_PATTERN" "$SITE_PATH" 2>/dev/null)
+  if [ -n "$STEALTH_MATCH" ]; then
+    echo "!!! WARNING: Found stealth/anti-debug toggles (often used by shells):"
+    FILTERED_STEALTH=$(printf "%s\n" "$STEALTH_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -20)
+    echo "$FILTERED_STEALTH"
+    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_STEALTH")
+    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+      echo " -> Showing matched lines with line numbers (first 3 matches per file):"
+      printf "%s\n" "$FILTERED_STEALTH" | while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        echo "----- $f -----"
+        grep -n -I -E "$STEALTH_PATTERN" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+      done
+    fi
+  else
+    echo "OK: No stealth toggle patterns found."
+  fi
+
+  echo " -> Searching for variable-function calls (\$f(...)) combined with superglobals..."
+  VARFUNC_PATTERN="\\$[A-Za-z_][A-Za-z0-9_]*\\s*\\("
+  SUPERGLOBAL_ANY="\\$_(GET|POST|REQUEST|COOKIE)"
+  VARFUNC_HITS=$(grep -R -l -I --include="*.php" -E "$VARFUNC_PATTERN" "$SITE_PATH" 2>/dev/null)
+  if [ -n "$VARFUNC_HITS" ]; then
+    VARFUNC_SUSP=$(printf "%s\n" "$VARFUNC_HITS" | while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      if grep -q -I -E "$SUPERGLOBAL_ANY" "$f" 2>/dev/null; then
+        echo "$f"
+      fi
+    done | sort -u)
+  else
+    VARFUNC_SUSP=""
+  fi
+  if [ -n "$VARFUNC_SUSP" ]; then
+    echo "!!! WARNING: Found variable function calls in files that also reference superglobals (common backdoor technique):"
+    FILTERED_VARFUNC=$(printf "%s\n" "$VARFUNC_SUSP" | grep -v -E "wp-includes/|wp-admin/" | head -20)
+    echo "$FILTERED_VARFUNC"
+    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_VARFUNC")
+    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+      echo " -> Showing matched lines with line numbers (first 3 matches per file):"
+      printf "%s\n" "$FILTERED_VARFUNC" | while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        echo "----- $f -----"
+        grep -n -I -E "($VARFUNC_PATTERN|$SUPERGLOBAL_ANY)" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+      done
+    fi
+  else
+    echo "OK: No variable-function + superglobal combo hits."
+  fi
+
+  echo " -> Searching for high-entropy blobs in tiny PHP files..."
+  ENTROPY_PATTERN="[A-Za-z0-9+/]{200,}={0,2}"
+  ENTROPY_FILES=$(find "$SITE_PATH" -type f -name "*.php" -exec sh -c '
+    f="$1"
+    pat="$2"
+    if ! grep -Iq . "$f" 2>/dev/null; then
+      exit 0
+    fi
+    lc=$(wc -l < "$f" 2>/dev/null)
+    if [ -n "$lc" ] && [ "$lc" -lt 20 ] && grep -q -E "$pat" "$f" 2>/dev/null; then
+      echo "$f"
+    fi
+  ' sh {} "$ENTROPY_PATTERN" \; 2>/dev/null)
+  if [ -n "$ENTROPY_FILES" ]; then
+    echo "!!! WARNING: Found small PHP files containing large base64-ish blobs (common loader/stager pattern):"
+    FILTERED_ENTROPY=$(printf "%s\n" "$ENTROPY_FILES" | grep -v -E "wp-includes/|wp-admin/" | head -20)
+    echo "$FILTERED_ENTROPY"
+    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_ENTROPY")
+    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+      echo " -> Showing matched lines with line numbers (first 3 matches per file):"
+      printf "%s\n" "$FILTERED_ENTROPY" | while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        echo "----- $f -----"
+        grep -n -I -E "$ENTROPY_PATTERN" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+      done
+    fi
+  else
+    echo "OK: No high-entropy blob hits in small PHP files."
+  fi
 fi
 
 # New: Dynamic Variable Execution Scan
 if [ "$DO_DYN_EXEC" -eq 1 ]; then
   echo " -> Searching for dynamic function execution patterns..."
-  DYN_EXEC_PATTERN="(\$\w+\s*$$).*['\"](eval|system|shell_exec|passthru|exec|assert|create_function)['\"]"
+  DYN_EXEC_PATTERN="(\$[A-Za-z_][A-Za-z0-9_]*\s*=\s*).*['\"](eval|system|shell_exec|passthru|exec|assert|create_function)['\"]"
   DYN_EXEC_MATCH=$(grep -R -l -I --include="*.php" -E "$DYN_EXEC_PATTERN" "$SITE_PATH" 2>/dev/null)
   if [ -n "$DYN_EXEC_MATCH" ]; then
     echo "!!! WARNING: Found patterns suggesting dynamic function execution. Review these files:"
@@ -661,7 +806,7 @@ fi
 # New: Superglobal backdoor pattern scan
 if [ "$DO_SUPERGLOBAL" -eq 1 ]; then
   echo -e "\n[+] Scanning for superglobal-driven backdoor patterns..."
-  SUPER_PATTERN="(\$_(GET|POST|REQUEST|COOKIE)).*\s*(eval\s*$$|system\s*$$|shell_exec\s*$$|passthru\s*$$|popen\s*$$|proc_open\s*$$|assert\s*$$|create_function\s*$$|preg_replace.*\/e)"
+  SUPER_PATTERN="(\$_(GET|POST|REQUEST|COOKIE)).*(\\b(eval|system|shell_exec|passthru|popen|proc_open|assert|create_function)\\b\\s*\\(|preg_replace.*\\/e)"
   SUPER_MATCH=$(grep -R -l -I --include="*.php" -E "$SUPER_PATTERN" "$SITE_PATH" 2>/dev/null)
   if [ -n "$SUPER_MATCH" ]; then
     echo "!!! WARNING: Superglobal-driven exec/eval patterns found:"
