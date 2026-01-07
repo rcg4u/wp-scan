@@ -25,10 +25,11 @@ Generic WordPress and site security scanner (Bash) that surfaces suspicious chan
 - **WordPress version**: report detected WP version for manual CVE checks
 - **Permissions**: surface world‑writable files outside cache/uploads
 - **Verification files**: detect top‑level verification HTML and any files in `.well-known` (fixes prior search)
+- **Access logs**: scan `/home/<user>/access-logs` and `/home/<user>/logs` for suspicious request patterns (webshell probes, traversal, SQLi markers, etc.)
 - **Email notifications**: send the full report via mail/sendmail/msmtp when warnings are found
 - **JSON output**: machine‑readable summary for automation
 - **Exit code control**: choose between binary 0/1 or counts (capped to 254)
-- **Interactive menu**: choose which modules to run without CLI flags
+- **Interactive menu**: choose which modules to run without CLI flags (menu shows the trigger flag for each module)
 - **Non‑WordPress mode**: skip WP‑specific checks safely for generic sites
 
 ## Requirements
@@ -65,6 +66,7 @@ If no arguments are provided, usage is shown.
 - `--scan-all`: force-enable all modules for this run (overrides default non‑WP exclusions)
 
 Environment variables for email:
+
 - `WP_SCAN_EMAIL_TO`, `WP_SCAN_EMAIL_FROM`, `WP_SCAN_EMAIL_SUBJECT`, `WP_SCAN_EMAIL_ALWAYS`
 
 ### Module triggers
@@ -86,29 +88,31 @@ Environment variables for email:
 - `--wpver` / `--no-wpver`
 - `--perms` / `--no-perms`
 - `--verification` / `--no-verification`
+- `--access-logs` / `--no-access-logs`
 
-Modules: `recent`, `suspicious`, `uploads`, `uploads-php`, `backdoor`, `obfuscation`, `phpshell`, `dyn-exec`, `oneliner`, `wp-cli`, `immutable`, `hidden`, `superglobal`, `curl`, `wpver`, `perms`, `all`
+Modules: `recent`, `suspicious`, `uploads`, `uploads-php`, `backdoor`, `obfuscation`, `phpshell`, `dyn-exec`, `oneliner`, `wp-cli`, `immutable`, `hidden`, `superglobal`, `curl`, `wpver`, `perms`, `verification`, `access-logs`, `all`
 
 ### Interactive menu
 
 Run with `--menu` and enter selections like `1,3,8`:
 
-1) Recent files
-2) Suspicious names
-3) Uploads sanity (non‑month dirs)
-4) Backdoor signatures
-5) Obfuscation
-6) cURL calls
-7) WordPress version
-8) Permissions
-9) Uploads PHP
-10) Hidden dotfiles
-11) Superglobal backdoors
-12) Verification files (.well-known & top-level)
-13) Dynamic execution patterns
-14) Potential one-liner shells
-15) WP-CLI deep checks
-16) Immutable files (+i attribute)
+1) Recent files (`--recent`)
+2) Suspicious names (`--suspicious`)
+3) Uploads sanity (non‑month dirs) (`--uploads`)
+4) Backdoor signatures (`--backdoor`)
+5) Obfuscation (`--obfuscation`)
+6) cURL calls (`--curl`)
+7) WordPress version (`--wpver`)
+8) Permissions (`--perms`)
+9) Uploads PHP (`--uploads-php`)
+10) Hidden dotfiles (`--hidden`)
+11) Superglobal backdoors (`--superglobal`)
+12) Verification files (.well-known & top-level) (`--verification`)
+13) Access logs scan (`--access-logs`)
+14) Dynamic execution patterns (`--dyn-exec`)
+15) Potential one-liner shells (`--oneliner`)
+16) WP-CLI deep checks (`--wp-cli`)
+17) Immutable files (+i attribute) (`--immutable`)
 
 ### JSON output
 
@@ -134,7 +138,8 @@ When `--json` is set, a compact JSON summary like below is printed:
     "superglobal": 0,
     "curl": 0,
     "perms_world_writable": 0,
-    "verification_files": 1
+    "verification_files": 1,
+    "access_logs": 2
   }
 }
 ```
@@ -172,6 +177,9 @@ bash wp-scan.sh --zip /var/www/html/scan-flags.zip /var/www/html/site
 ## Notes
 
 - `.well-known` and top‑level verification HTML files are detected to help spot unauthorized ownership claims.
+- Access logs scan:
+  - If the scanned site path looks like `/home/<user>/public_html/...`, the script will prefer `/home/<user>/access-logs` and `/home/<user>/logs`.
+  - Otherwise it falls back to scanning `/home/*/access-logs` and `/home/*/logs`.
 - PHP files inside `wp-content/uploads` are commonly malicious; legitimate sites should store media only.
 - Context preview (`--sc`) prints matched lines with their line numbers (no surrounding context).
 - cURL matches are filtered to ignore standard WP core/theme/plugin paths.
