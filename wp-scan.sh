@@ -55,6 +55,11 @@ EMAIL_SUBJECT="${WP_SCAN_EMAIL_SUBJECT:-}"
 EMAIL_ALWAYS="${WP_SCAN_EMAIL_ALWAYS:-0}"
 ARG_SITE=""
 
+# Access log ignorelist (IPs/CIDRs) for access-log module
+# Env var: WP_SCAN_IGNORE_IPS (CSV or space-separated)
+IGNORE_IPS_RAW="${WP_SCAN_IGNORE_IPS:-}"
+IGNORE_IPS=""
+
 # WordPress mode (default on). Disable with --no-wordpress
 WP_MODE=1
 
@@ -164,6 +169,7 @@ while [ $# -gt 0 ]; do
     --json) JSON_OUTPUT=1; shift ;;
     --exit-code) EXIT_CODE_MODE="$2"; shift 2 ;;
     --zip) ZIP_ENABLED=1; ZIP_TARGET_ZIP="$2"; shift 2 ;;
+  --ignore-ips) IGNORE_IPS_RAW="$2"; shift 2 ;;
     --with-cache) EXCLUDE_CACHE=0; shift ;;
     --scan-all) SCAN_ALL=1; set_module_flag all; shift ;;
     --recent) set_module_flag recent; shift ;;
@@ -205,7 +211,8 @@ while [ $# -gt 0 ]; do
     -h|--help)
       echo "Usage: $0 [options] /path/to/site/root"
       echo
-      echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --only <modules> --skip <modules> --no-wordpress --sc --json --exit-code <binary|count> --zip <filename.zip> --with-cache --scan-all"
+      echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --only <modules> --skip <modules> --no-wordpress --sc --json --exit-code <binary|count> --zip <filename.zip> --with-cache --scan-all --ignore-ips <list>"
+      echo "         --ignore-ips accepts CSV/space-separated IPs or CIDRs (e.g. 1.2.3.4,10.0.0.0/8) and excludes them from access-log findings."
   echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --uploads-php/--no-uploads-php --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --hidden/--no-hidden --superglobal/--no-superglobal --curl/--no-curl --wpver/--no-wpver --perms/--no-perms --immutable/--no-immutable --verification/--no-verification --access-logs/--no-access-logs --dyn-exec/--no-dyn-exec --oneliner/--no-oneliner --wp-cli/--no-wp-cli"
   echo "Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, dyn-exec, oneliner, wp-cli, hidden, superglobal, curl, wpver, perms, immutable, verification, access-logs, all"
       echo
@@ -224,6 +231,9 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+# Normalize ignore list (CSV -> space separated)
+IGNORE_IPS=$(echo "$IGNORE_IPS_RAW" | tr ',' ' ')
 
 if [ -z "$ARG_SITE" ]; then
   # No arguments provided: show help and exit
@@ -429,6 +439,10 @@ fi
 if [ "$DO_ACCESS_LOGS" -eq 1 ]; then
   echo -e "\n[+] Scanning access logs under /home/* (access-logs + logs) for suspicious requests..."
 
+  if [ -n "$IGNORE_IPS" ]; then
+    echo " -> Ignoring access-log source IPs/CIDRs: $IGNORE_IPS"
+  fi
+
   ACCESS_LOG_FINDINGS=""
   ACCESS_LOG_FILES=""
   ACCESS_LOG_MATCHED_LINES=""
@@ -446,6 +460,45 @@ if [ "$DO_ACCESS_LOGS" -eq 1 ]; then
     # Output: status code (e.g., 200) or empty
     # Prefer: after request "..." <status>
     printf "%s" "$1" | sed -n -E 's/.*"[A-Z]+ [^"]+ HTTP\/[0-9.]+"[[:space:]]+([0-9]{3}).*/\1/p'
+  }
+
+  # Returns 0 (true) if the log line should be ignored due to matching IGNORE_IPS.
+  # Supports:
+  #  - exact IPv4 match (e.g. 1.2.3.4)
+  #  - CIDR /8,/16,/24 only (e.g. 10.0.0.0/8)
+  # If a line doesn't begin with an IPv4, it will not be ignored.
+  should_ignore_access_log_line() {
+    local ln="$1"
+    [ -z "$IGNORE_IPS" ] && return 1
+    local ip
+    ip=$(printf "%s" "$ln" | sed -n -E 's/^([0-9]{1,3}(\.[0-9]{1,3}){3}).*/\1/p')
+    [ -z "$ip" ] && return 1
+
+    local item base prefix
+    for item in $IGNORE_IPS; do
+      [ -z "$item" ] && continue
+      case "$item" in
+        */8)
+          base=${item%/8}
+          prefix=$(printf "%s" "$base" | sed -n -E 's/^([0-9]{1,3})\..*/\1/p')
+          [ -n "$prefix" ] && [[ "$ip" == "$prefix."* ]] && return 0
+          ;;
+        */16)
+          base=${item%/16}
+          prefix=$(printf "%s" "$base" | sed -n -E 's/^([0-9]{1,3}\.[0-9]{1,3})\..*/\1/p')
+          [ -n "$prefix" ] && [[ "$ip" == "$prefix."* ]] && return 0
+          ;;
+        */24)
+          base=${item%/24}
+          prefix=$(printf "%s" "$base" | sed -n -E 's/^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})\..*/\1/p')
+          [ -n "$prefix" ] && [[ "$ip" == "$prefix."* ]] && return 0
+          ;;
+        *)
+          [ "$ip" = "$item" ] && return 0
+          ;;
+      esac
+    done
+    return 1
   }
 
   bump_status_bucket() {
@@ -475,7 +528,14 @@ if [ "$DO_ACCESS_LOGS" -eq 1 ]; then
       local pat
   pat="(/\.env(\b|$))|(/wp-config\.php(\b|$))|(/xmlrpc\.php(\b|$))|(/wp-admin/?(\b|$))|(/wp-login\.php(\b|$))|(/wp-content/(uploads|mu-plugins)/[^ ]*\.(php|phtml|php[0-9]|phar)(\b|$))|(/\.git/)|(/\.svn/)|(/\.hg/)|(/cgi-bin/)|(/(wp-includes|wp-admin)/[^ ]*\.(php|phtml)(\b|$))|(/phpmyadmin/?|/pma/?|/adminer\.php(\b|$))|(/\.well-known/)|\b(Go-http-client|python-requests|curl/|Wget/|libwww-perl|masscan|zgrab|sqlmap|nikto|acunetix|nessus|openvas|wpscan|nmap|gobuster|dirb|dirbuster)\b|\.(bak|old|orig|save|swp|swo|~)(\b|$)|\b(select\b.*\bfrom\b|union([+%20]|%2b)+select|information_schema|sleep\(|benchmark\(|load_file\(|outfile|into([+%20]|%2b)+dumpfile)\b|\bxp_cmdshell\b)\b|\b(or|and)([+%20]|%2b)+1=1\b|\b(wp_)?users\b.*\b(user_login|user_pass)\b|\bpasswd\b|\bshadow\b|((/|%2f)(etc|proc)(/|%2f)(passwd|shadow|self/environ|version))|\b(\.{2}(/|\\\\|%2f|%5c)){2,}\b|\b(%2e%2e%2f|%2e%2e%5c){2,}\b|\bphp://(input|filter)\b|\bdata://\b|\bphar://\b|\bexpect://\b|\b(\$\{|\$\(|\x60|;|\|\||&&)\b|\b(cmd=|exec=|system=|shell=|powershell=|bash=|sh=|wget=|curl=|python=|perl=|php=)\b|\b(base64|base64_decode|gzinflate|str_rot13|eval\(|assert\(|passthru\(|shell_exec\(|proc_open\(|popen\(|\bwhoami\b|\bid\b|\buname\b)"
       local hits
-      hits=$(grep -n -E -i "$pat" "$f" 2>/dev/null | head -50)
+      hits=$(grep -n -E -i "$pat" "$f" 2>/dev/null | while IFS= read -r hl; do
+        # Strip grep-added line prefix for ignore check
+        ln=$(printf "%s" "$hl" | sed -E 's/^[0-9]+://')
+        if should_ignore_access_log_line "$ln"; then
+          continue
+        fi
+        echo "$hl"
+      done | head -50)
       if [ -n "$hits" ]; then
         ACCESS_LOG_FILES=$(printf "%s\n%s\n" "$ACCESS_LOG_FILES" "$f")
         ACCESS_LOG_FINDINGS=$(printf "%s\n=== %s ===\n%s\n" "$ACCESS_LOG_FINDINGS" "$f" "$hits")
@@ -494,7 +554,13 @@ if [ "$DO_ACCESS_LOGS" -eq 1 ]; then
     local pat
   pat="(/\.env(\b|$))|(/wp-config\.php(\b|$))|(/xmlrpc\.php(\b|$))|(/wp-admin/?(\b|$))|(/wp-login\.php(\b|$))|(/wp-content/(uploads|mu-plugins)/[^ ]*\.(php|phtml|php[0-9]|phar)(\b|$))|(/\.git/)|(/\.svn/)|(/\.hg/)|(/cgi-bin/)|(/(wp-includes|wp-admin)/[^ ]*\.(php|phtml)(\b|$))|(/phpmyadmin/?|/pma/?|/adminer\.php(\b|$))|(/\.well-known/)|\b(Go-http-client|python-requests|curl/|Wget/|libwww-perl|masscan|zgrab|sqlmap|nikto|acunetix|nessus|openvas|wpscan|nmap|gobuster|dirb|dirbuster)\b|\.(bak|old|orig|save|swp|swo|~)(\b|$)|\b(select\b.*\bfrom\b|union([+%20]|%2b)+select|information_schema|sleep\(|benchmark\(|load_file\(|outfile|into([+%20]|%2b)+dumpfile)\b|\bxp_cmdshell\b)\b|\b(or|and)([+%20]|%2b)+1=1\b|\b(wp_)?users\b.*\b(user_login|user_pass)\b|\bpasswd\b|\bshadow\b|((/|%2f)(etc|proc)(/|%2f)(passwd|shadow|self/environ|version))|\b(\.{2}(/|\\\\|%2f|%5c)){2,}\b|\b(%2e%2e%2f|%2e%2e%5c){2,}\b|\bphp://(input|filter)\b|\bdata://\b|\bphar://\b|\bexpect://\b|\b(\$\{|\$\(|\x60|;|\|\||&&)\b|\b(cmd=|exec=|system=|shell=|powershell=|bash=|sh=|wget=|curl=|python=|perl=|php=)\b|\b(base64|base64_decode|gzinflate|str_rot13|eval\(|assert\(|passthru\(|shell_exec\(|proc_open\(|popen\(|\bwhoami\b|\bid\b|\buname\b)"
     local hits
-    hits=$(gzip -cd -- "$f" 2>/dev/null | grep -n -E -i "$pat" | head -50)
+    hits=$(gzip -cd -- "$f" 2>/dev/null | grep -n -E -i "$pat" | while IFS= read -r hl; do
+      ln=$(printf "%s" "$hl" | sed -E 's/^[0-9]+://')
+      if should_ignore_access_log_line "$ln"; then
+        continue
+      fi
+      echo "$hl"
+    done | head -50)
     if [ -n "$hits" ]; then
       ACCESS_LOG_FILES=$(printf "%s\n%s\n" "$ACCESS_LOG_FILES" "$f")
       ACCESS_LOG_FINDINGS=$(printf "%s\n=== %s ===\n%s\n" "$ACCESS_LOG_FINDINGS" "$f" "$hits")

@@ -67,10 +67,15 @@ If no arguments are provided, usage is shown.
 - `--with-cache`: include `wp-content/cache` in the recent files scan (excluded by default)
 - `--zip <filename.zip>`: create a zip archive containing flagged files (recent changes, PHP shells, backdoor/obfuscation matches, hidden dotfiles, superglobal patterns, verification files, uploads PHP, world‑writable, filtered cURL, dynamic execution, one-liner shells, immutable files). Entries use absolute paths, and a `wp-scan-manifest.txt` is included listing all full paths for easy reference.
 - `--scan-all`: force-enable all modules for this run (overrides default non‑WP exclusions)
+- `--ignore-ips <list>`: exclude one or more source IPs (or simple CIDRs) from **access log** findings and summaries. Accepts CSV or space-separated values. Supported CIDRs: `/8`, `/16`, `/24`.
 
 Environment variables for email:
 
 - `WP_SCAN_EMAIL_TO`, `WP_SCAN_EMAIL_FROM`, `WP_SCAN_EMAIL_SUBJECT`, `WP_SCAN_EMAIL_ALWAYS`
+
+Environment variables for access logs:
+
+- `WP_SCAN_IGNORE_IPS`: same as `--ignore-ips` (CSV or space-separated)
 
 ### Module triggers
 
@@ -197,6 +202,31 @@ bash wp-scan.sh --zip /var/www/html/scan-flags.zip /var/www/html/site
 - This scanner can produce false positives; always verify manually.
 - The WP-CLI module requires the `wp` command to be installed and accessible.
 - The immutable file check requires the `lsattr` command and only works on filesystems that support extended attributes (like ext4).
+
+### Windows line endings (CRLF) on Linux/WSL
+
+If you edit `*.sh` files on Windows, they may end up with CRLF line endings (`\r\n`).
+On Linux, this can cause confusing errors like:
+
+- `syntax error near unexpected token $'{\r''`
+
+Fix it by converting to Unix line endings (LF):
+
+```bash
+# Option A: dos2unix (if installed)
+dos2unix wp-scan.sh
+
+# Option B: sed (works on most Linux systems)
+sed -i 's/\r$//' wp-scan.sh
+```
+
+To confirm there are no CR characters left:
+
+```bash
+grep -n $'\r' wp-scan.sh | head
+```
+
+No output means the file is clean.
 
 ## Changelog
 
