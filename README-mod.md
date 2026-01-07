@@ -25,7 +25,7 @@ The scanner is designed to help you quickly spot common compromise indicators:
 Run it from Linux (or WSL) like:
 
 ```bash
-./wp-scan.sh /path/to/wordpress
+./wp-scan-mod.sh /path/to/wordpress
 ```
 
 > Note: the script expects a WordPress root (it checks for `wp-config.php`) unless you use `--no-wordpress`.
@@ -35,7 +35,7 @@ Run it from Linux (or WSL) like:
 Interactive selection menu:
 
 ```bash
-./wp-scan.sh --menu /path/to/wordpress
+./wp-scan-mod.sh --menu /path/to/wordpress
 ```
 
 - You can type multiple triggers on one line (space or comma separated)
@@ -47,7 +47,7 @@ Interactive selection menu:
 If you pass any module trigger flags (like `--recent`), the scanner switches to **explicit selection mode**:
 
 ```bash
-./wp-scan.sh --recent --uploads-php /path/to/wordpress
+./wp-scan-mod.sh --recent --uploads-php /path/to/wordpress
 ```
 
 That means **only** those selected modules run.
@@ -55,7 +55,7 @@ That means **only** those selected modules run.
 If you want everything regardless, use:
 
 ```bash
-./wp-scan.sh --scan-all /path/to/wordpress
+./wp-scan-mod.sh --scan-all /path/to/wordpress
 ```
 
 ## WP‑CLI checks
@@ -66,6 +66,6 @@ If the scanner runs as root, it automatically adds `--allow-root` when calling `
 
 ## Files
 
-- `wp-scan.sh`: entry script
+- `wp-scan-mod.sh`: entry script
 - `lib/`: shared code (CLI parsing, menu, dispatcher)
 - `modules/`: one file per scan module
