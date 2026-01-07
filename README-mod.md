@@ -1,5 +1,7 @@
 # wp-scan (modular)
 
+> **EXPERIMENTAL:** This modular version is still in flux. Interfaces, module names, and output may change without notice.
+
 This folder contains a modular Bash scanner for WordPress sites.
 
 ## What it does
