@@ -431,6 +431,33 @@ if [ "$DO_ACCESS_LOGS" -eq 1 ]; then
 
   ACCESS_LOG_FINDINGS=""
   ACCESS_LOG_FILES=""
+  ACCESS_LOG_MATCHED_LINES=""
+  ACCESS_LOG_STATUS_2XX=0
+  ACCESS_LOG_STATUS_3XX=0
+  ACCESS_LOG_STATUS_4XX=0
+  ACCESS_LOG_STATUS_5XX=0
+  ACCESS_LOG_STATUS_0=0
+
+  # Try to extract HTTP status code from common log formats.
+  # Common/combined log format ends with: "<METHOD> <PATH> HTTP/x.y" <status> <bytes>
+  # Some variants have: <status> right after the closing quote.
+  extract_http_status() {
+    # Input: full log line
+    # Output: status code (e.g., 200) or empty
+    # Prefer: after request "..." <status>
+    printf "%s" "$1" | sed -n -E 's/.*"[A-Z]+ [^"]+ HTTP\/[0-9.]+"[[:space:]]+([0-9]{3}).*/\1/p'
+  }
+
+  bump_status_bucket() {
+    local st="$1"
+    case "$st" in
+      2??) ACCESS_LOG_STATUS_2XX=$((ACCESS_LOG_STATUS_2XX + 1)) ;;
+      3??) ACCESS_LOG_STATUS_3XX=$((ACCESS_LOG_STATUS_3XX + 1)) ;;
+      4??) ACCESS_LOG_STATUS_4XX=$((ACCESS_LOG_STATUS_4XX + 1)) ;;
+      5??) ACCESS_LOG_STATUS_5XX=$((ACCESS_LOG_STATUS_5XX + 1)) ;;
+      *) ACCESS_LOG_STATUS_0=$((ACCESS_LOG_STATUS_0 + 1)) ;;
+    esac
+  }
 
   # If the scanned site is under /home/<user>/public_html, prefer that user's log folders.
   ACCESS_LOG_USER=""
@@ -446,12 +473,15 @@ if [ "$DO_ACCESS_LOGS" -eq 1 ]; then
     if grep -Iq . "$f" 2>/dev/null; then
       # A small but useful set of high-signal patterns.
       local pat
-      pat="(\?[^ ]*(cmd=|exec=|system=|shell=|base64|eval|assert|GLOBALS|_POST\[|_GET\[))|(/(wp-admin|wp-login\.php)\.php)|(/\.env)|(/wp-config\.php)|(/xmlrpc\.php)|(/\.git/)|(/cgi-bin/)|((/|%2f)(c99|r57|wso|b374k)[^ ]*\.php)|((/|%2f)shell[^ ]*\.php)|((/|%2f)webshell[^ ]*\.php)|((union[+%20]+select|information_schema|sleep\(|benchmark\()|((/|%2f)etc(/|%2f)passwd)|\b(base64_decode|gzinflate|str_rot13|php://input)\b)"
+      pat="(/\.env(\b|$))|(/wp-config\.php(\b|$))|(/xmlrpc\.php(\b|$))|(/wp-admin/?(\b|$))|(/wp-login\.php(\b|$))|(/wp-content/(uploads|mu-plugins)/[^ ]*\.(php|phtml|php[0-9]|phar)(\b|$))|(/\.git/)|(/\.svn/)|(/\.hg/)|(/cgi-bin/)|(/(wp-includes|wp-admin)/[^ ]*\.(php|phtml)(\b|$))|(/phpmyadmin/?|/pma/?|/adminer\.php(\b|$))|(/\.well-known/)|\b(Go-http-client|python-requests|curl/|Wget/|libwww-perl|masscan|zgrab|sqlmap|nikto|acunetix|nessus|openvas|wpscan|nmap|gobuster|dirb|dirbuster)\b|\.(bak|old|orig|save|swp|swo|~)(\b|$)|\b(select\b.*\bfrom\b|union([+%20]|%2b)+select|information_schema|sleep\(|benchmark\(|load_file\(|outfile|into([+%20]|%2b)+dumpfile)\b|\bxp_cmdshell\b)\b|\b(or|and)([+%20]|%2b)+1=1\b|\b(wp_)?users\b.*\b(user_login|user_pass)\b|\bpasswd\b|\bshadow\b|((/|%2f)(etc|proc)(/|%2f)(passwd|shadow|self/environ|version))|\b(\.{2}(/|\\\\|%2f|%5c)){2,}\b|\b(%2e%2e%2f|%2e%2e%5c){2,}\b|\bphp://(input|filter)\b|\bdata://\b|\bphar://\b|\bexpect://\b|\b(\$\{|\$\(|`|;|\|\||&&)\b|\b(cmd=|exec=|system=|shell=|powershell=|bash=|sh=|wget=|curl=|python=|perl=|php=)\b|\b(base64|base64_decode|gzinflate|str_rot13|eval\(|assert\(|passthru\(|shell_exec\(|proc_open\(|popen\(|\bwhoami\b|\bid\b|\buname\b)"
       local hits
       hits=$(grep -n -E -i "$pat" "$f" 2>/dev/null | head -50)
       if [ -n "$hits" ]; then
         ACCESS_LOG_FILES=$(printf "%s\n%s\n" "$ACCESS_LOG_FILES" "$f")
         ACCESS_LOG_FINDINGS=$(printf "%s\n=== %s ===\n%s\n" "$ACCESS_LOG_FINDINGS" "$f" "$hits")
+
+        # Capture matched lines for status parsing (strip the grep-added line number prefix)
+        ACCESS_LOG_MATCHED_LINES=$(printf "%s\n%s\n" "$ACCESS_LOG_MATCHED_LINES" "$(printf "%s\n" "$hits" | sed -E 's/^[0-9]+://')")
       fi
     fi
   }
@@ -462,12 +492,15 @@ if [ "$DO_ACCESS_LOGS" -eq 1 ]; then
     [ -f "$f" ] || return 0
     command -v gzip >/dev/null 2>&1 || return 0
     local pat
-    pat="(\?[^ ]*(cmd=|exec=|system=|shell=|base64|eval|assert|GLOBALS|_POST\[|_GET\[))|(/(wp-admin|wp-login\.php)\.php)|(/\.env)|(/wp-config\.php)|(/xmlrpc\.php)|(/\.git/)|(/cgi-bin/)|((/|%2f)(c99|r57|wso|b374k)[^ ]*\.php)|((/|%2f)shell[^ ]*\.php)|((/|%2f)webshell[^ ]*\.php)|((union[+%20]+select|information_schema|sleep\(|benchmark\()|((/|%2f)etc(/|%2f)passwd)|\b(base64_decode|gzinflate|str_rot13|php://input)\b)"
+    pat="(/\.env(\b|$))|(/wp-config\.php(\b|$))|(/xmlrpc\.php(\b|$))|(/wp-admin/?(\b|$))|(/wp-login\.php(\b|$))|(/wp-content/(uploads|mu-plugins)/[^ ]*\.(php|phtml|php[0-9]|phar)(\b|$))|(/\.git/)|(/\.svn/)|(/\.hg/)|(/cgi-bin/)|(/(wp-includes|wp-admin)/[^ ]*\.(php|phtml)(\b|$))|(/phpmyadmin/?|/pma/?|/adminer\.php(\b|$))|(/\.well-known/)|\b(Go-http-client|python-requests|curl/|Wget/|libwww-perl|masscan|zgrab|sqlmap|nikto|acunetix|nessus|openvas|wpscan|nmap|gobuster|dirb|dirbuster)\b|\.(bak|old|orig|save|swp|swo|~)(\b|$)|\b(select\b.*\bfrom\b|union([+%20]|%2b)+select|information_schema|sleep\(|benchmark\(|load_file\(|outfile|into([+%20]|%2b)+dumpfile)\b|\bxp_cmdshell\b)\b|\b(or|and)([+%20]|%2b)+1=1\b|\b(wp_)?users\b.*\b(user_login|user_pass)\b|\bpasswd\b|\bshadow\b|((/|%2f)(etc|proc)(/|%2f)(passwd|shadow|self/environ|version))|\b(\.{2}(/|\\\\|%2f|%5c)){2,}\b|\b(%2e%2e%2f|%2e%2e%5c){2,}\b|\bphp://(input|filter)\b|\bdata://\b|\bphar://\b|\bexpect://\b|\b(\$\{|\$\(|`|;|\|\||&&)\b|\b(cmd=|exec=|system=|shell=|powershell=|bash=|sh=|wget=|curl=|python=|perl=|php=)\b|\b(base64|base64_decode|gzinflate|str_rot13|eval\(|assert\(|passthru\(|shell_exec\(|proc_open\(|popen\(|\bwhoami\b|\bid\b|\buname\b)"
     local hits
     hits=$(gzip -cd -- "$f" 2>/dev/null | grep -n -E -i "$pat" | head -50)
     if [ -n "$hits" ]; then
       ACCESS_LOG_FILES=$(printf "%s\n%s\n" "$ACCESS_LOG_FILES" "$f")
       ACCESS_LOG_FINDINGS=$(printf "%s\n=== %s ===\n%s\n" "$ACCESS_LOG_FINDINGS" "$f" "$hits")
+
+      # Capture matched lines for status parsing (strip the grep-added line number prefix)
+      ACCESS_LOG_MATCHED_LINES=$(printf "%s\n%s\n" "$ACCESS_LOG_MATCHED_LINES" "$(printf "%s\n" "$hits" | sed -E 's/^[0-9]+://')")
     fi
   }
 
@@ -514,6 +547,57 @@ if [ "$DO_ACCESS_LOGS" -eq 1 ]; then
   if [ -n "$ACCESS_LOG_FINDINGS" ]; then
     echo "!!! WARNING: Suspicious access log requests found (showing first hits per file):"
     echo "$ACCESS_LOG_FINDINGS" | head -200
+
+    # Quick summary: surface the most frequent indicators across all hits
+    echo " -> Access log quick summary (top indicators):"
+    echo "    Flagged log files: $(printf "%s\n" "$ACCESS_LOG_FILES" | sed '/^\s*$/d' | wc -l | awk '{print $1}')"
+
+    # Derive a success/blocked heuristic from HTTP status codes in the matched lines.
+    # Interpretation:
+    #  - 2xx/3xx on suspicious requests = request likely reached an endpoint (possible success)
+    #  - 4xx = more likely blocked/missing (not conclusive)
+    #  - 5xx = server error (could still indicate an exploitable path)
+    #  - unknown = can't parse
+    ACCESS_LOG_STATUS_2XX=0
+    ACCESS_LOG_STATUS_3XX=0
+    ACCESS_LOG_STATUS_4XX=0
+    ACCESS_LOG_STATUS_5XX=0
+    ACCESS_LOG_STATUS_0=0
+    if [ -n "$ACCESS_LOG_MATCHED_LINES" ]; then
+      while IFS= read -r ln; do
+        [ -z "$ln" ] && continue
+        st=$(extract_http_status "$ln")
+        if [ -n "$st" ]; then
+          bump_status_bucket "$st"
+        else
+          ACCESS_LOG_STATUS_0=$((ACCESS_LOG_STATUS_0 + 1))
+        fi
+      done < <(printf "%s\n" "$ACCESS_LOG_MATCHED_LINES")
+    fi
+    echo "    Status buckets (matched lines): 2xx=$ACCESS_LOG_STATUS_2XX  3xx=$ACCESS_LOG_STATUS_3XX  4xx=$ACCESS_LOG_STATUS_4XX  5xx=$ACCESS_LOG_STATUS_5XX  unknown=$ACCESS_LOG_STATUS_0"
+    POSS_SUCCESS=$((ACCESS_LOG_STATUS_2XX + ACCESS_LOG_STATUS_3XX))
+    POSS_BLOCKED=$((ACCESS_LOG_STATUS_4XX))
+    if [ "$POSS_SUCCESS" -gt 0 ]; then
+      echo "    Likely outcome: POSSIBLE SUCCESS (suspicious requests returned 2xx/3xx)"
+    elif [ "$POSS_BLOCKED" -gt 0 ] && [ "$ACCESS_LOG_STATUS_5XX" -eq 0 ]; then
+      echo "    Likely outcome: LIKELY BLOCKED/NOT FOUND (only 4xx seen on suspicious requests)"
+    elif [ "$ACCESS_LOG_STATUS_5XX" -gt 0 ]; then
+      echo "    Likely outcome: INCONCLUSIVE (5xx errors on suspicious requests; investigate)"
+    else
+      echo "    Likely outcome: UNKNOWN (could not parse status codes from log lines)"
+    fi
+
+    # Extract hit lines, normalize to lower, and count common indicators
+    printf "%s\n" "$ACCESS_LOG_FINDINGS" \
+      | grep -E -i "(^[0-9]+:|\b(Go-http-client|python-requests|curl/|Wget/|libwww-perl|masscan|zgrab|sqlmap|nikto|acunetix|nessus|openvas|wpscan|nmap|gobuster|dirb|dirbuster)\b|/\.env\b|/wp-config\.php\b|/xmlrpc\.php\b|/wp-login\.php\b|/wp-admin\b|/phpmyadmin\b|/adminer\.php\b|/\.git/|\.{2}/|%2e%2e%2f|php://|data://|phar://|expect://|union[+%20]%?select|information_schema|sleep\(|benchmark\()" \
+      | tr 'A-Z' 'a-z' \
+      | grep -o -E "go-http-client|python-requests|curl/|wget/|libwww-perl|masscan|zgrab|sqlmap|nikto|acunetix|nessus|openvas|wpscan|nmap|gobuster|dirb|dirbuster|/\.env|/wp-config\.php|/xmlrpc\.php|/wp-login\.php|/wp-admin|/phpmyadmin|/adminer\.php|/\.git/|\.\./|%2e%2e%2f|php://|data://|phar://|expect://|information_schema|union|sleep\(|benchmark\(" \
+      | sort \
+      | uniq -c \
+      | sort -nr \
+      | head -15 \
+      | sed 's/^/    /'
+
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$ACCESS_LOG_FILES")
   else
     echo "OK: No suspicious access log patterns found in /home/* access logs."
@@ -972,6 +1056,34 @@ echo "==========================================================================
 echo "Disclaimer: This script is a powerful scanning aid. It may produce false"
 echo "positives. All findings should be manually investigated and verified."
 echo "=========================================================================="
+
+# --- Human-friendly summary (always shown) ---
+summary_count_lines() { printf "%s\n" "$1" | sed '/^\s*$/d' | wc -l | awk '{print $1}'; }
+SUMMARY_WARN=$(grep -c "!!! WARNING" "$LOG_FILE" 2>/dev/null || echo 0)
+SUMMARY_STATUS="OK"; [ "$SUMMARY_WARN" -gt 0 ] && SUMMARY_STATUS="WARNINGS"
+
+echo -e "\n[+] Summary"
+echo " -> Status: $SUMMARY_STATUS ($SUMMARY_WARN warnings)"
+echo " -> Recently modified files: $(summary_count_lines "$RECENT_FILES")"
+echo " -> Uploads non-month dirs:  $(summary_count_lines "$FAKE_MONTH_DIRS")"
+echo " -> Uploads PHP files:       $(summary_count_lines "$UPLOADS_PHP_FILES")"
+echo " -> Backdoor hits (filtered):$(summary_count_lines "$FILTERED_BACKDOOR")"
+echo " -> Obfuscation hits (filt): $(summary_count_lines "$FILTERED_OBFUSCATED")"
+echo " -> PHP shell indicators:    $(summary_count_lines "$PHPSHELL_UNIQUE")"
+echo " -> Hidden dotfiles:         $(summary_count_lines "$HIDDEN_FILES")"
+echo " -> Superglobal exec hits:   $(summary_count_lines "$FILTERED_SUPER")"
+echo " -> cURL hits (filtered):    $(summary_count_lines "$FILTERED_CURL")"
+echo " -> World-writable files:    $(summary_count_lines "$WRITABLE_FILES")"
+echo " -> Verification files:      $(summary_count_lines "$VERIFICATION_FILES")"
+echo " -> Access-log files flagged:$(summary_count_lines "$ACCESS_LOG_FILES")"
+echo " -> Dyn-exec hits (filtered):$(summary_count_lines "$FILTERED_DYN_EXEC")"
+echo " -> One-liner hits (filt):   $(summary_count_lines "$FILTERED_ONELINER")"
+echo " -> Immutable files:         $(summary_count_lines "$IMMUTABLE_FILES")"
+
+if [ -n "$ACCESS_LOG_FINDINGS" ]; then
+  echo " -> Access log highlights (first ~20 lines across files):"
+  echo "$ACCESS_LOG_FINDINGS" | head -20
+fi
 
 
 # --- Email Notification (optional) ---
