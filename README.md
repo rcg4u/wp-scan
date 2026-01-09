@@ -1,7 +1,5 @@
 # wp-scan
 
-**Version:** 2026.1.6
-
 Generic WordPress and site security scanner (Bash) that surfaces suspicious changes and high‑risk patterns quickly. Runs on Linux/WSL and scans a target webroot for common indicators of compromise.
 
 ## Features
@@ -17,18 +15,18 @@ Generic WordPress and site security scanner (Bash) that surfaces suspicious chan
 - **One-liner shells**: find very small PHP files (< 5 lines) that contain dangerous functions, a common backdoor tactic
 - **Immutable files**: detect files with the immutable (`+i`) attribute, a strong indicator of rootkits or persistent backdoors
 - **WP-CLI deep checks**: perform context-aware WordPress checks (if `wp` command is available):
-  - **Core integrity**: verify core files against official checksums.
-  - **Plugin/Theme status**: list inactive plugins/themes and known vulnerabilities.
-  - **User security**: list admin users and flag users with no role.
-  - **Database status**: report database size and suspicious options.
+    - **Core integrity**: verify core files against official checksums.
+    - **Plugin/Theme status**: list inactive plugins/themes and known vulnerabilities.
+    - **User security**: list admin users and flag users with no role.
+    - **Database status**: report database size and suspicious options.
 - **Hidden dotfiles**: flag `.*` files (excluding VCS and `.well-known`) that may hide config/secrets
 - **Superglobal backdoors**: spot `$_GET/$_POST/$_REQUEST/$_COOKIE` driving `eval/exec/system/...`
 - **cURL calls**: list files that make cURL requests (frequent in data exfil/backdoors)
 - **WordPress version**: report detected WP version for manual CVE checks
 - **Permissions**: surface world‑writable files outside cache/uploads
 - **Verification files**: detect top‑level verification HTML and any files in `.well-known` (fixes prior search)
-- **Access logs**: scan `/home/<user>/access-logs` and `/home/<user>/logs` for suspicious request patterns (webshell probes, traversal/LFI, RFI wrappers, SQLi markers, scanner UAs, etc.)
-  - Includes a quick summary of top indicators and a status-code heuristic (2xx/3xx vs 4xx/5xx) to help judge whether suspicious requests may have reached an endpoint.
+- **Access logs**: scan `/home/<user>/access-logs` and `/home/<user>/logs` for suspicious request patterns (webshell probes, traversal, SQLi markers, etc.)
+- **Excluded IPs (results)**: hide known/noisy IPs from access-log scan output via `excluded-ips.txt` or `--exclude-ips-file` (scan still reads all logs)
 - **Email notifications**: send the full report via mail/sendmail/msmtp when warnings are found
 - **JSON output**: machine‑readable summary for automation
 - **Exit code control**: choose between binary 0/1 or counts (capped to 254)
@@ -66,16 +64,17 @@ If no arguments are provided, usage is shown.
 - `--exit-code <binary|count>`: exit 0/1 in binary mode or return the warning count (capped to 254)
 - `--with-cache`: include `wp-content/cache` in the recent files scan (excluded by default)
 - `--zip <filename.zip>`: create a zip archive containing flagged files (recent changes, PHP shells, backdoor/obfuscation matches, hidden dotfiles, superglobal patterns, verification files, uploads PHP, world‑writable, filtered cURL, dynamic execution, one-liner shells, immutable files). Entries use absolute paths, and a `wp-scan-manifest.txt` is included listing all full paths for easy reference.
+- `--exclude-ips-file <file>`: file containing IPs to exclude from access-log *results* (one IP per line; `#` comments allowed)
 - `--scan-all`: force-enable all modules for this run (overrides default non‑WP exclusions)
-- `--ignore-ips <list>`: exclude one or more source IPs (or simple CIDRs) from **access log** findings and summaries. Accepts CSV or space-separated values. Supported CIDRs: `/8`, `/16`, `/24`.
 
 Environment variables for email:
 
 - `WP_SCAN_EMAIL_TO`, `WP_SCAN_EMAIL_FROM`, `WP_SCAN_EMAIL_SUBJECT`, `WP_SCAN_EMAIL_ALWAYS`
 
-Environment variables for access logs:
+Environment variables:
 
-- `WP_SCAN_IGNORE_IPS`: same as `--ignore-ips` (CSV or space-separated)
+- `WP_SCAN_EXCLUDED_IPS_FILE`: same as `--exclude-ips-file` (optional)
+- `NO_COLOR`: set to disable ANSI color in the Summary output
 
 ### Module triggers
 
@@ -185,52 +184,24 @@ bash wp-scan.sh --zip /var/www/html/scan-flags.zip /var/www/html/site
 ## Notes
 
 - `.well-known` and top‑level verification HTML files are detected to help spot unauthorized ownership claims.
+- Excluding IPs from results:
+  - If `excluded-ips.txt` exists next to `wp-scan.sh`, it is used automatically.
+  - You can override with `--exclude-ips-file /path/to/file` or `WP_SCAN_EXCLUDED_IPS_FILE=/path/to/file`.
+  - This only filters what gets printed; it does not skip scanning the log files.
 - Access logs scan:
   - If the scanned site path looks like `/home/<user>/public_html/...`, the script will prefer `/home/<user>/access-logs` and `/home/<user>/logs`.
   - Otherwise it falls back to scanning `/home/*/access-logs` and `/home/*/logs`.
-  - Quick summary:
-    - Reports the number of log files with suspicious hits.
-    - Shows the most common indicators (e.g., `/.env`, `wp-login.php`, traversal, `php://`, scanner user agents).
-    - Buckets HTTP status codes seen on suspicious lines and prints a **likely outcome** hint:
-      - **POSSIBLE SUCCESS**: suspicious requests returned 2xx/3xx
-      - **LIKELY BLOCKED/NOT FOUND**: only 4xx responses seen
-      - **INCONCLUSIVE**: 5xx responses present
-      - **UNKNOWN**: status codes couldn’t be parsed from the log format
 - PHP files inside `wp-content/uploads` are commonly malicious; legitimate sites should store media only.
 - Context preview (`--sc`) prints matched lines with their line numbers (no surrounding context).
 - cURL matches are filtered to ignore standard WP core/theme/plugin paths.
 - This scanner can produce false positives; always verify manually.
+- The Summary may show a red `Files to review (high-signal matches; not proof)` section listing paths worth checking first.
 - The WP-CLI module requires the `wp` command to be installed and accessible.
 - The immutable file check requires the `lsattr` command and only works on filesystems that support extended attributes (like ext4).
 
-### Windows line endings (CRLF) on Linux/WSL
-
-If you edit `*.sh` files on Windows, they may end up with CRLF line endings (`\r\n`).
-On Linux, this can cause confusing errors like:
-
-- `syntax error near unexpected token $'{\r''`
-
-Fix it by converting to Unix line endings (LF):
-
-```bash
-# Option A: dos2unix (if installed)
-dos2unix wp-scan.sh
-
-# Option B: sed (works on most Linux systems)
-sed -i 's/\r$//' wp-scan.sh
-```
-
-To confirm there are no CR characters left:
-
-```bash
-grep -n $'\r' wp-scan.sh | head
-```
-
-No output means the file is clean.
-
 ## Changelog
 
-- **2026‑01‑06**: Expanded access-log detection patterns (more real-world probes: traversal/LFI, wrapper/RFI, scanners, sensitive paths) and added access-log quick summary + HTTP status-code outcome heuristic.
+- **2026‑01‑09**: Added excluded IP filtering for access-log results (`excluded-ips.txt`, `--exclude-ips-file`, `WP_SCAN_EXCLUDED_IPS_FILE`), added a high-signal “files to review” summary section, and fixed numeric warning-count parsing that could trigger `integer expression expected`.
 - **2026‑01‑02**: Added `--wp-cli` module for deep WordPress-specific checks (core integrity, vulnerabilities, users) and `--immutable` module to detect files with the `+i` attribute. Updated requirements and all documentation.
 - **2026‑01‑01**: Added `dyn-exec` and `oneliner` modules to detect more advanced and unknown PHP shells. Fixed output issues where file lists were not being displayed for several modules. Tagged: `features/advanced-shell-detection-2026-01-01`.
 - **2025‑12‑31**: Added uploads‑PHP, hidden dotfiles, superglobal backdoor scan, JSON summary output, exit‑code control, and fixed verification files search. Tagged: `features/all-suggested-2025-12-31`.
