@@ -1,0 +1,8 @@
+# Example signature rules for wp-scan
+# Lines starting with '#' are comments. This is a simple newline-delimited list of patterns.
+# Example: flag files named suspicious.php
+suspicious.php
+# Pattern: look for eval usage
+\beval\b
+# Pattern: base64 decode usage
+\bbase64_decode\b

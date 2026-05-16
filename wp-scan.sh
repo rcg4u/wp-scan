@@ -86,6 +86,15 @@ ARG_SITE=""
 # Example: WP_SCAN_VERIFICATION_ALLOWLIST="googlefdc65b73a3888f99.html,bing12345.html"
 VERIFICATION_ALLOWLIST="${WP_SCAN_VERIFICATION_ALLOWLIST:-}"
 
+# Signature feed (rules) support
+# Default URL can be overridden via --signatures-url or env var WP_SCAN_SIGNATURES_URL
+SIGNATURES_URL="${WP_SCAN_SIGNATURES_URL:-https://example.com/wp-scan-signatures/latest-signatures.txt}"
+# Local directory to store downloaded signatures (relative to script dir)
+SIGNATURES_DIR="${WP_SCAN_SIGNATURES_DIR:-$SCRIPT_DIR/signatures}"
+# When set, perform a signatures update and exit
+DO_UPDATE_SIGNATURES=0
+
+
 # Optional: file containing IPs to exclude from scan *results* (one per line).
 # Env var: WP_SCAN_EXCLUDED_IPS_FILE
 EXCLUDED_IPS_FILE="${WP_SCAN_EXCLUDED_IPS_FILE:-}"
@@ -219,6 +228,9 @@ while [ $# -gt 0 ]; do
     --exclude-ips-file) EXCLUDED_IPS_FILE="$2"; shift 2 ;;
     --with-cache) EXCLUDE_CACHE=0; shift ;;
     --scan-all) SCAN_ALL=1; set_module_flag all; shift ;;
+    --update-signatures) DO_UPDATE_SIGNATURES=1; shift ;;
+    --signatures-url) SIGNATURES_URL="$2"; shift 2 ;;
+    --signatures-dir) SIGNATURES_DIR="$2"; shift 2 ;;
     --recent) enter_only_mode_if_needed; set_module_flag recent; shift ;;
     --no-recent) clear_module_flag recent; shift ;;
     --suspicious) enter_only_mode_if_needed; set_module_flag suspicious; shift ;;
@@ -364,7 +376,42 @@ filter_excluded_ips() {
 }
 
 prepare_excluded_ip_patterns
+
+# --- Signature update helper ---
+update_signatures() {
+  mkdir -p "$SIGNATURES_DIR" 2>/dev/null || true
+  echo "[+] Updating signatures from: $SIGNATURES_URL"
+  # Prefer curl, fallback to wget
+  if command -v curl >/dev/null 2>&1; then
+    if ! curl -fsSL "$SIGNATURES_URL" -o "$SIGNATURES_DIR/latest-signatures.txt"; then
+      echo "[WARN] Failed to download signatures with curl from $SIGNATURES_URL"
+      return 1
+    fi
+  elif command -v wget >/dev/null 2>&1; then
+    if ! wget -qO "$SIGNATURES_DIR/latest-signatures.txt" "$SIGNATURES_URL"; then
+      echo "[WARN] Failed to download signatures with wget from $SIGNATURES_URL"
+      return 1
+    fi
+  else
+    echo "[WARN] No HTTP download tool (curl/wget) available; cannot update signatures."
+    return 1
+  fi
+  echo "[+] Signatures saved to: $SIGNATURES_DIR/latest-signatures.txt"
+  return 0
+}
+
 trap cleanup_excluded_ip_patterns EXIT
+
+# If requested, update signatures and exit early
+if [ "$DO_UPDATE_SIGNATURES" -eq 1 ]; then
+  if update_signatures; then
+    echo "Signatures updated successfully."
+    exit 0
+  else
+    echo "Signature update failed."
+    exit 2
+  fi
+fi
 
 
 # Optional interactive module selection
