@@ -207,6 +207,55 @@ bash wp-scan.sh --with-cache /var/www/html/site
 bash wp-scan.sh --zip /var/www/html/scan-flags.zip /var/www/html/site
 ```
 
+### Examples for sleepyhosting (user: sleepyi)
+
+Below are concise example invocations tailored to the sleepyhosting.com site for the local path /home/sleepyi4/public_html and the site owner account "sleepyi".
+
+Local filesystem examples (run as site owner):
+
+```bash
+# Full scan with JSON summary and count exit mode (run as sleepyi)
+sudo -u sleepyi bash wp-scan.sh --json --exit-code count /home/sleepyi4/public_html
+
+# Check uploads and uploads-php only and produce a zip archive of flagged files
+sudo -u sleepyi bash wp-scan.sh --only uploads,uploads-php --zip /tmp/sleepyi-scan.zip /home/sleepyi4/public_html
+```
+
+Remote HTTP-only examples (no filesystem access required):
+
+```bash
+# Lightweight remote scan (dry-run) against the public site
+bash wp-scan.sh --url https://sleepyhosting.com --dry-run
+
+# Remote SARIF emission (dry-run recommended first)
+bash wp-scan.sh --url https://sleepyhosting.com --dry-run --sarif /tmp/sleepy-remote.sarif
+```
+
+Interactive menu example:
+
+```bash
+# Start interactive menu for the local site
+bash wp-scan.sh --menu /home/sleepyi4/public_html
+# At the prompt, enter selections like: 1,3,9,21
+```
+
+Combined reporting examples:
+
+```bash
+# Dry-run full scan, emit SARIF and CSV for triage (no archive created)
+sudo -u sleepyi bash wp-scan.sh --dry-run --sarif /tmp/sleepyi.sarif --csv /tmp/sleepyi.csv /home/sleepyi4/public_html
+
+# Live scan with email notification if warnings are found
+sudo -u sleepyi bash wp-scan.sh --email security@sleepyhosting.com /home/sleepyi4/public_html
+```
+
+Notes specific to sleepyhosting examples:
+
+- Use `--dry-run` when testing new flags to avoid creating archives or making changes.
+- Running under the site owner (sudo -u sleepyi) helps ensure file permission visibility when scanning /home/sleepyi4/public_html.
+- The `--url` mode is useful for public sites where filesystem access is not available; it performs lightweight HTTP probes and skips filesystem modules.
+
+
 ## Notes
 
 - `.well-known` and top‑level verification HTML files are detected to help spot unauthorized ownership claims.
