@@ -26,6 +26,7 @@ Generic WordPress and site security scanner (Bash) that surfaces suspicious chan
 - **Permissions**: surface world‑writable files outside cache/uploads
 - **Verification files**: detect top‑level verification HTML and any files in `.well-known` (fixes prior search)
 - **Access logs**: scan `/home/<user>/access-logs` and `/home/<user>/logs` for suspicious request patterns (webshell probes, traversal, SQLi markers, etc.)
+- **ModSecurity logs**: scan common ModSecurity audit/debug logs under `/var/log/*` for access denials and rule hits (rule id/message/uri/client when present)
 - **Excluded IPs (results)**: hide known/noisy IPs from access-log scan output via `excluded-ips.txt` or `--exclude-ips-file` (scan still reads all logs)
 - **Email notifications**: send the full report via mail/sendmail/msmtp when warnings are found
 - **JSON output**: machine‑readable summary for automation
@@ -96,8 +97,15 @@ Environment variables:
 - `--perms` / `--no-perms`
 - `--verification` / `--no-verification`
 - `--access-logs` / `--no-access-logs`
+- `--modsec-logs` / `--no-modsec-logs`
 
-Modules: `recent`, `suspicious`, `uploads`, `uploads-php`, `backdoor`, `obfuscation`, `phpshell`, `dyn-exec`, `oneliner`, `wp-cli`, `immutable`, `hidden`, `superglobal`, `curl`, `wpver`, `perms`, `verification`, `access-logs`, `all`
+Modules: `recent`, `suspicious`, `uploads`, `uploads-php`, `backdoor`, `obfuscation`, `phpshell`, `dyn-exec`, `oneliner`, `wp-cli`, `immutable`, `hidden`, `superglobal`, `curl`, `wpver`, `perms`, `verification`, `access-logs`, `modsec-logs`, `all`
+
+Note on module triggers:
+
+- If you pass one or more **enable** triggers (example: `--modsec-logs`), the script will run **only** those enabled modules for that run.
+- Use `--scan-all` if you want the full scan.
+- `--no-...` triggers simply disable modules from the default full scan.
 
 ### Interactive menu
 
@@ -116,10 +124,11 @@ Run with `--menu` and enter selections like `1,3,8`:
 11) Superglobal backdoors (`--superglobal`)
 12) Verification files (.well-known & top-level) (`--verification`)
 13) Access logs scan (`--access-logs`)
-14) Dynamic execution patterns (`--dyn-exec`)
-15) Potential one-liner shells (`--oneliner`)
-16) WP-CLI deep checks (`--wp-cli`)
-17) Immutable files (+i attribute) (`--immutable`)
+14) ModSecurity logs scan (`--modsec-logs`)
+15) Dynamic execution patterns (`--dyn-exec`)
+16) Potential one-liner shells (`--oneliner`)
+17) WP-CLI deep checks (`--wp-cli`)
+18) Immutable files (+i attribute) (`--immutable`)
 
 ### JSON output
 
@@ -146,7 +155,8 @@ When `--json` is set, a compact JSON summary like below is printed:
     "curl": 0,
     "perms_world_writable": 0,
     "verification_files": 1,
-    "access_logs": 2
+    "access_logs": 2,
+    "modsec_logs": 1
   }
 }
 ```
@@ -201,6 +211,7 @@ bash wp-scan.sh --zip /var/www/html/scan-flags.zip /var/www/html/site
 
 ## Changelog
 
+- **2026‑01‑09**: Added ModSecurity log scanning (`--modsec-logs`) and included results in Summary/JSON output.
 - **2026‑01‑09**: Added excluded IP filtering for access-log results (`excluded-ips.txt`, `--exclude-ips-file`, `WP_SCAN_EXCLUDED_IPS_FILE`), added a high-signal “files to review” summary section, and fixed numeric warning-count parsing that could trigger `integer expression expected`.
 - **2026‑01‑02**: Added `--wp-cli` module for deep WordPress-specific checks (core integrity, vulnerabilities, users) and `--immutable` module to detect files with the `+i` attribute. Updated requirements and all documentation.
 - **2026‑01‑01**: Added `dyn-exec` and `oneliner` modules to detect more advanced and unknown PHP shells. Fixed output issues where file lists were not being displayed for several modules. Tagged: `features/advanced-shell-detection-2026-01-01`.

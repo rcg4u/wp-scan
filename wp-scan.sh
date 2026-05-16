@@ -35,12 +35,13 @@
 #   --immutable / --no-immutable
 #   --verification / --no-verification
 #   --access-logs / --no-access-logs
+#   --modsec-logs / --no-modsec-logs
 #   --dyn-exec / --no-dyn-exec
 #   --oneliner / --no-oneliner
 #   --wp-cli / --no-wp-cli
 #   --help                  Show usage
 #
-# Modules: recent, suspicious, uploads, backdoor, obfuscation, phpshell, curl, wpver, perms, immutable, dyn-exec, oneliner, wp-cli, all
+# Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, hidden, superglobal, curl, wpver, perms, verification, access-logs, modsec-logs, dyn-exec, oneliner, wp-cli, immutable, all
 # Example: ./wp-scan.sh --only recent,uploads --email admin@example.com /var/www/html/site
 # ====================================================================
 
@@ -54,6 +55,11 @@ EMAIL_FROM="${WP_SCAN_EMAIL_FROM:-}"
 EMAIL_SUBJECT="${WP_SCAN_EMAIL_SUBJECT:-}"
 EMAIL_ALWAYS="${WP_SCAN_EMAIL_ALWAYS:-0}"
 ARG_SITE=""
+
+# Optional allowlist for known-good site verification files.
+# Env var: WP_SCAN_VERIFICATION_ALLOWLIST
+# Example: WP_SCAN_VERIFICATION_ALLOWLIST="googlefdc65b73a3888f99.html,bing12345.html"
+VERIFICATION_ALLOWLIST="${WP_SCAN_VERIFICATION_ALLOWLIST:-}"
 
 # Optional: file containing IPs to exclude from scan *results* (one per line).
 # Env var: WP_SCAN_EXCLUDED_IPS_FILE
@@ -89,13 +95,27 @@ DO_PERMS=1
 DO_IMMUTABLE=1
 DO_VERIFICATION=1
 DO_ACCESS_LOGS=1
+DO_MODSEC_LOGS=1
 DO_DYN_EXEC=1
 DO_ONELINER=1
 DO_WP_CLI=1
 MENU_MODE=0
 
+# If the user passes one or more *enable* module triggers (e.g. --modsec-logs),
+# automatically switch to "only these modules" mode (like --only) unless --scan-all was used.
+DEFAULTS_CLEARED=0
+
 enable_only_defaults() {
-  DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_ACCESS_LOGS=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0
+  DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_ACCESS_LOGS=0; DO_MODSEC_LOGS=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0
+  DEFAULTS_CLEARED=1
+}
+
+enter_only_mode_if_needed() {
+  # Only enter "only these modules" mode when user explicitly enabled a module,
+  # and they didn't request --scan-all.
+  if [ "$SCAN_ALL" -eq 0 ] && [ "$DEFAULTS_CLEARED" -eq 0 ]; then
+    enable_only_defaults
+  fi
 }
 
 set_module_flag() {
@@ -111,11 +131,12 @@ set_module_flag() {
     immutable) DO_IMMUTABLE=1 ;;
     verification) DO_VERIFICATION=1 ;;
     access-logs) DO_ACCESS_LOGS=1 ;;
+    modsec-logs) DO_MODSEC_LOGS=1 ;;
     dyn-exec) DO_DYN_EXEC=1 ;;
     oneliner) DO_ONELINER=1 ;;
     wp-cli) DO_WP_CLI=1 ;;
     all)
-      DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_UPLOADS_PHP=1; DO_BACKDOOR=1; DO_OBFUSCATED=1; DO_PHPSHELL=1; DO_HIDDEN=1; DO_SUPERGLOBAL=1; DO_CURL=1; DO_WPVER=1; DO_PERMS=1; DO_IMMUTABLE=1; DO_VERIFICATION=1; DO_ACCESS_LOGS=1; DO_DYN_EXEC=1; DO_ONELINER=1; DO_WP_CLI=1
+      DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_UPLOADS_PHP=1; DO_BACKDOOR=1; DO_OBFUSCATED=1; DO_PHPSHELL=1; DO_HIDDEN=1; DO_SUPERGLOBAL=1; DO_CURL=1; DO_WPVER=1; DO_PERMS=1; DO_IMMUTABLE=1; DO_VERIFICATION=1; DO_ACCESS_LOGS=1; DO_MODSEC_LOGS=1; DO_DYN_EXEC=1; DO_ONELINER=1; DO_WP_CLI=1
       ;;
   esac
 }
@@ -133,11 +154,12 @@ clear_module_flag() {
     immutable) DO_IMMUTABLE=0 ;;
     verification) DO_VERIFICATION=0 ;;
     access-logs) DO_ACCESS_LOGS=0 ;;
+    modsec-logs) DO_MODSEC_LOGS=0 ;;
     dyn-exec) DO_DYN_EXEC=0 ;;
     oneliner) DO_ONELINER=0 ;;
     wp-cli) DO_WP_CLI=0 ;;
     all)
-      DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_ACCESS_LOGS=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0
+      DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_ACCESS_LOGS=0; DO_MODSEC_LOGS=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0
       ;;
   esac
 }
@@ -172,48 +194,50 @@ while [ $# -gt 0 ]; do
     --exclude-ips-file) EXCLUDED_IPS_FILE="$2"; shift 2 ;;
     --with-cache) EXCLUDE_CACHE=0; shift ;;
     --scan-all) SCAN_ALL=1; set_module_flag all; shift ;;
-    --recent) set_module_flag recent; shift ;;
+    --recent) enter_only_mode_if_needed; set_module_flag recent; shift ;;
     --no-recent) clear_module_flag recent; shift ;;
-    --suspicious) set_module_flag suspicious; shift ;;
+    --suspicious) enter_only_mode_if_needed; set_module_flag suspicious; shift ;;
     --no-suspicious) clear_module_flag suspicious; shift ;;
-    --uploads) set_module_flag uploads; shift ;;
+    --uploads) enter_only_mode_if_needed; set_module_flag uploads; shift ;;
     --no-uploads) clear_module_flag uploads; shift ;;
-    --backdoor) set_module_flag backdoor; shift ;;
+    --backdoor) enter_only_mode_if_needed; set_module_flag backdoor; shift ;;
     --no-backdoor) clear_module_flag backdoor; shift ;;
-    --obfuscation) set_module_flag obfuscation; shift ;;
+    --obfuscation) enter_only_mode_if_needed; set_module_flag obfuscation; shift ;;
     --no-obfuscation) clear_module_flag obfuscation; shift ;;
-    --phpshell) DO_PHPSHELL=1; shift ;;
+    --phpshell) enter_only_mode_if_needed; DO_PHPSHELL=1; shift ;;
     --no-phpshell) DO_PHPSHELL=0; shift ;;
-    --uploads-php) DO_UPLOADS_PHP=1; shift ;;
+    --uploads-php) enter_only_mode_if_needed; DO_UPLOADS_PHP=1; shift ;;
     --no-uploads-php) DO_UPLOADS_PHP=0; shift ;;
-    --hidden) DO_HIDDEN=1; shift ;;
+    --hidden) enter_only_mode_if_needed; DO_HIDDEN=1; shift ;;
     --no-hidden) DO_HIDDEN=0; shift ;;
-    --superglobal) set_module_flag superglobal; shift ;;
+    --superglobal) enter_only_mode_if_needed; set_module_flag superglobal; shift ;;
     --no-superglobal) clear_module_flag superglobal; shift ;;
-    --curl) set_module_flag curl; shift ;;
+    --curl) enter_only_mode_if_needed; set_module_flag curl; shift ;;
     --no-curl) clear_module_flag curl; shift ;;
-    --wpver) set_module_flag wpver; shift ;;
+    --wpver) enter_only_mode_if_needed; set_module_flag wpver; shift ;;
     --no-wpver) clear_module_flag wpver; shift ;;
-    --perms) set_module_flag perms; shift ;;
+    --perms) enter_only_mode_if_needed; set_module_flag perms; shift ;;
     --no-perms) clear_module_flag perms; shift ;;
-    --immutable) set_module_flag immutable; shift ;;
+    --immutable) enter_only_mode_if_needed; set_module_flag immutable; shift ;;
     --no-immutable) clear_module_flag immutable; shift ;;
-    --verification) set_module_flag verification; shift ;;
+    --verification) enter_only_mode_if_needed; set_module_flag verification; shift ;;
     --no-verification) clear_module_flag verification; shift ;;
-  --access-logs) set_module_flag access-logs; shift ;;
+  --access-logs) enter_only_mode_if_needed; set_module_flag access-logs; shift ;;
   --no-access-logs) clear_module_flag access-logs; shift ;;
-    --dyn-exec) set_module_flag dyn-exec; shift ;;
+    --modsec-logs) enter_only_mode_if_needed; set_module_flag modsec-logs; shift ;;
+    --no-modsec-logs) clear_module_flag modsec-logs; shift ;;
+    --dyn-exec) enter_only_mode_if_needed; set_module_flag dyn-exec; shift ;;
     --no-dyn-exec) clear_module_flag dyn-exec; shift ;;
-    --oneliner) set_module_flag oneliner; shift ;;
+    --oneliner) enter_only_mode_if_needed; set_module_flag oneliner; shift ;;
     --no-oneliner) clear_module_flag oneliner; shift ;;
-    --wp-cli) set_module_flag wp-cli; shift ;;
+    --wp-cli) enter_only_mode_if_needed; set_module_flag wp-cli; shift ;;
     --no-wp-cli) clear_module_flag wp-cli; shift ;;
     -h|--help)
       echo "Usage: $0 [options] /path/to/site/root"
       echo
       echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --only <modules> --skip <modules> --no-wordpress --sc --json --exit-code <binary|count> --zip <filename.zip> --exclude-ips-file <file> --with-cache --scan-all"
-  echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --uploads-php/--no-uploads-php --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --hidden/--no-hidden --superglobal/--no-superglobal --curl/--no-curl --wpver/--no-wpver --perms/--no-perms --immutable/--no-immutable --verification/--no-verification --access-logs/--no-access-logs --dyn-exec/--no-dyn-exec --oneliner/--no-oneliner --wp-cli/--no-wp-cli"
-  echo "Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, dyn-exec, oneliner, wp-cli, hidden, superglobal, curl, wpver, perms, immutable, verification, access-logs, all"
+      echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --uploads-php/--no-uploads-php --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --hidden/--no-hidden --superglobal/--no-superglobal --curl/--no-curl --wpver/--no-wpver --perms/--no-perms --immutable/--no-immutable --verification/--no-verification --access-logs/--no-access-logs --modsec-logs/--no-modsec-logs --dyn-exec/--no-dyn-exec --oneliner/--no-oneliner --wp-cli/--no-wp-cli"
+      echo "Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, dyn-exec, oneliner, wp-cli, hidden, superglobal, curl, wpver, perms, immutable, verification, access-logs, modsec-logs, all"
       echo
       echo "Examples:"
       echo " $0 --only recent,uploads --email admin@example.com /var/www/html/site"
@@ -334,10 +358,11 @@ if [ "$MENU_MODE" -eq 1 ]; then
   echo "11) Superglobal backdoor patterns                 (--superglobal)"
   echo "12) Verification files (.well-known & top-level)  (--verification)"
   echo "13) Access logs scan (/home/<user>/logs, etc.)    (--access-logs)"
-  echo "14) Dynamic execution patterns                    (--dyn-exec)"
-  echo "15) Potential one-liner shells                    (--oneliner)"
-  echo "16) WP-CLI deep checks                            (--wp-cli)"
-  echo "17) Immutable files (+i attribute)                (--immutable)"
+  echo "14) ModSecurity logs scan (/var/log/*modsec*)     (--modsec-logs)"
+  echo "15) Dynamic execution patterns                    (--dyn-exec)"
+  echo "16) Potential one-liner shells                    (--oneliner)"
+  echo "17) WP-CLI deep checks                            (--wp-cli)"
+  echo "18) Immutable files (+i attribute)                (--immutable)"
   echo "Select modules to run (e.g., 1,3,8) or press Enter for default (all):"
   read -r USER_SEL
   if [ -n "$USER_SEL" ]; then
@@ -357,10 +382,11 @@ if [ "$MENU_MODE" -eq 1 ]; then
         11) DO_SUPERGLOBAL=1 ;;
         12) DO_VERIFICATION=1 ;;
         13) DO_ACCESS_LOGS=1 ;;
-        14) DO_DYN_EXEC=1 ;;
-        15) DO_ONELINER=1 ;;
-        16) DO_WP_CLI=1 ;;
-        17) DO_IMMUTABLE=1 ;;
+        14) DO_MODSEC_LOGS=1 ;;
+        15) DO_DYN_EXEC=1 ;;
+        16) DO_ONELINER=1 ;;
+        17) DO_WP_CLI=1 ;;
+        18) DO_IMMUTABLE=1 ;;
       esac
     done
   fi
@@ -476,12 +502,51 @@ fi
 
 # Check for any verification files (Google, Bing, Yandex, etc.)
 if [ "$DO_VERIFICATION" -eq 1 ]; then
-  VERIFICATION_FILES=$( { find "$SITE_PATH" -maxdepth 1 -type f \( -name "google*.html" -o -name "bing*.html" -o -name "yandex*.html" \) 2>/dev/null ; find "$SITE_PATH/.well-known" -type f 2>/dev/null ; } 2>/dev/null )
+  VERIFICATION_FILES_ALL=$( { find "$SITE_PATH" -maxdepth 1 -type f \( -name "google*.html" -o -name "bing*.html" -o -name "yandex*.html" \) 2>/dev/null ; find "$SITE_PATH/.well-known" -type f 2>/dev/null ; } 2>/dev/null )
+
+  # Split into allowlisted vs suspicious
+  VERIFICATION_FILES=""
+  VERIFICATION_FILES_ALLOWED=""
+  ALLOW_LIST=$(echo "$VERIFICATION_ALLOWLIST" | tr ',' ' ')
+  if [ -n "$VERIFICATION_FILES_ALL" ]; then
+    while IFS= read -r vf; do
+      [ -z "$vf" ] && continue
+      base=$(basename "$vf")
+      is_allowed=0
+      if [ -n "$ALLOW_LIST" ]; then
+        for a in $ALLOW_LIST; do
+          [ -z "$a" ] && continue
+          if [ "$base" = "$a" ]; then
+            is_allowed=1
+            break
+          fi
+        done
+      fi
+
+      if [ "$is_allowed" -eq 1 ]; then
+        VERIFICATION_FILES_ALLOWED=$(printf "%s\n%s" "$VERIFICATION_FILES_ALLOWED" "$vf")
+      else
+        VERIFICATION_FILES=$(printf "%s\n%s" "$VERIFICATION_FILES" "$vf")
+      fi
+    done < <(printf "%s\n" "$VERIFICATION_FILES_ALL" | sed '/^\s*$/d')
+  fi
+
+  # Print warnings only for non-allowlisted verification files
   if [ -n "$VERIFICATION_FILES" ]; then
-    echo "!!! WARNING: Found verification files. These could be for unauthorized ownership claims:"
+    VERIFICATION_FILES=$(printf "%s\n" "$VERIFICATION_FILES" | sed '/^\s*$/d')
+    echo "!!! WARNING: Found verification files (not allowlisted). These could be for unauthorized ownership claims:"
     echo "$VERIFICATION_FILES"
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$VERIFICATION_FILES")
-  else
+  fi
+
+  # Print allowlisted verification files without a WARNING label
+  if [ -n "$VERIFICATION_FILES_ALLOWED" ]; then
+    VERIFICATION_FILES_ALLOWED=$(printf "%s\n" "$VERIFICATION_FILES_ALLOWED" | sed '/^\s*$/d')
+    echo "INFO: Allowlisted verification files found:"
+    echo "$VERIFICATION_FILES_ALLOWED"
+  fi
+
+  if [ -z "$VERIFICATION_FILES" ] && [ -z "$VERIFICATION_FILES_ALLOWED" ]; then
     echo "OK: No verification files found."
   fi
 fi
@@ -668,6 +733,87 @@ if [ "$DO_ACCESS_LOGS" -eq 1 ]; then
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$ACCESS_LOG_FILES")
   else
     echo "OK: No suspicious access log patterns found in /home/* access logs."
+  fi
+fi
+
+
+# --- ModSecurity logs scan (audit/debug logs) ---
+if [ "$DO_MODSEC_LOGS" -eq 1 ]; then
+  echo -e "\n[+] Scanning ModSecurity logs (audit/debug) for blocked/suspicious requests..."
+
+  MODSEC_LOG_FINDINGS=""
+  MODSEC_LOG_FILES=""
+  MODSEC_MATCHED_LINES=""
+
+  # High-signal patterns commonly present in audit/debug logs.
+  # Example: ModSecurity: Access denied with code 403 (phase 2). ... [id "12345"] [msg "..."] [uri "/wp-login.php"] [client 1.2.3.4]
+  MODSEC_PAT="ModSecurity:|Access denied with code|\[id \"[0-9]+\"\]|\[msg \"|\[uri \"|\[client |\[hostname \"|\[tag \""
+
+  scan_plain_modsec_log() {
+    local f="$1"
+    [ -f "$f" ] || return 0
+    if grep -Iq . "$f" 2>/dev/null; then
+      local hits
+      hits=$(grep -n -E -i "$MODSEC_PAT" "$f" 2>/dev/null | head -80)
+      if [ -n "$hits" ]; then
+        MODSEC_LOG_FILES=$(printf "%s\n%s\n" "$MODSEC_LOG_FILES" "$f")
+        MODSEC_LOG_FINDINGS=$(printf "%s\n=== %s ===\n%s\n" "$MODSEC_LOG_FINDINGS" "$f" "$hits")
+        MODSEC_MATCHED_LINES=$(printf "%s\n%s\n" "$MODSEC_MATCHED_LINES" "$(printf "%s\n" "$hits" | sed -E 's/^[0-9]+://')")
+      fi
+    fi
+  }
+
+  scan_gz_modsec_log() {
+    local f="$1"
+    [ -f "$f" ] || return 0
+    command -v gzip >/dev/null 2>&1 || return 0
+    local hits
+    hits=$(gzip -cd -- "$f" 2>/dev/null | grep -n -E -i "$MODSEC_PAT" | head -80)
+    if [ -n "$hits" ]; then
+      MODSEC_LOG_FILES=$(printf "%s\n%s\n" "$MODSEC_LOG_FILES" "$f")
+      MODSEC_LOG_FINDINGS=$(printf "%s\n=== %s ===\n%s\n" "$MODSEC_LOG_FINDINGS" "$f" "$hits")
+      MODSEC_MATCHED_LINES=$(printf "%s\n%s\n" "$MODSEC_MATCHED_LINES" "$(printf "%s\n" "$hits" | sed -E 's/^[0-9]+://')")
+    fi
+  }
+
+  # Candidate locations (kept conservative to avoid huge scans)
+  for d in /var/log/apache2 /var/log/httpd /var/log/nginx /var/log/modsecurity /usr/local/apache/logs /var/log; do
+    [ -d "$d" ] || continue
+    while IFS= read -r lf; do
+      [ -z "$lf" ] && continue
+      case "$lf" in
+        *.gz) scan_gz_modsec_log "$lf" ;;
+        *) scan_plain_modsec_log "$lf" ;;
+      esac
+    done < <(
+      find "$d" -maxdepth 2 -type f \
+        \( -iname "*modsec*" -o -iname "*modsecurity*" -o -iname "modsec_audit.log*" -o -iname "modsecurity_audit.log*" \) \
+        2>/dev/null | head -200
+    )
+  done
+
+  MODSEC_LOG_FILES=$(printf "%s\n" "$MODSEC_LOG_FILES" | sed '/^\s*$/d' | sort -u)
+
+  if [ -n "$MODSEC_LOG_FINDINGS" ]; then
+    echo "!!! WARNING: ModSecurity log entries found (showing first hits per file):"
+    echo "$MODSEC_LOG_FINDINGS" | head -200
+
+    echo " -> ModSecurity quick summary:"
+    echo "    Flagged log files: $(printf "%s\n" "$MODSEC_LOG_FILES" | sed '/^\s*$/d' | wc -l | awk '{print $1}')"
+
+    # Top rule IDs (best-effort)
+    if [ -n "$MODSEC_MATCHED_LINES" ]; then
+      echo "    Top rule IDs (if present):"
+      printf "%s\n" "$MODSEC_MATCHED_LINES" \
+        | sed -n -E 's/.*\[id "([0-9]+)"\].*/\1/p' \
+        | sed '/^\s*$/d' \
+        | sort | uniq -c | sort -nr | head -10 \
+        | sed 's/^/      /'
+    fi
+
+    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$MODSEC_LOG_FILES")
+  else
+    echo "OK: No ModSecurity log entries found in common log locations."
   fi
 fi
 
@@ -1044,72 +1190,90 @@ fi
 
 # --- 7. WP-CLI Deep Checks ---
 if [ "$DO_WP_CLI" -eq 1 ]; then
-  if ! command -v wp >/dev/null 2>&1; then
+  # Determine how to invoke WP-CLI. Prefer env override, then `wp` on PATH.
+  WP_CLI_BIN="${WP_CLI_BIN:-${WP_CLI:-}}"
+  WP_CLI=()
+  if [ -n "$WP_CLI_BIN" ]; then
+    WP_CLI=("$WP_CLI_BIN")
+  elif command -v wp >/dev/null 2>&1; then
+    WP_CLI=(wp)
+  elif command -v wp-cli >/dev/null 2>&1; then
+    WP_CLI=(wp-cli)
+  elif [ -f "$SITE_PATH/wp-cli.phar" ] && command -v php >/dev/null 2>&1; then
+    WP_CLI=(php "$SITE_PATH/wp-cli.phar")
+  fi
+
+  if [ "${#WP_CLI[@]}" -eq 0 ]; then
     echo -e "\n[+] WP-CLI checks skipped: 'wp' command not found."
   else
     echo -e "\n[+] Running WP-CLI deep checks..."
     cd "$SITE_PATH" || { echo "Error: Could not change directory to $SITE_PATH"; exit 1; }
 
-    # Check if WP-CLI can run
-    if ! wp cli is-installed --quiet 2>/dev/null; then
+    WP_CLI_ARGS=()
+    if command -v id >/dev/null 2>&1 && [ "$(id -u 2>/dev/null)" = "0" ]; then
+      WP_CLI_ARGS+=(--allow-root)
+    fi
+
+    # Check if WP-CLI can talk to this WP install
+    if ! "${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" core is-installed --quiet 2>/dev/null; then
       echo "!!! WARNING: WP-CLI found but not functional for this installation. Skipping WP-CLI checks."
     else
       # 7.1 Core Integrity Check
       echo " -> Checking core file integrity..."
-      CORE_STATUS=$(wp core verify-checksums --format=json 2>/dev/null)
+      CORE_STATUS=$("${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" core verify-checksums --format=json 2>/dev/null)
       if [ $? -ne 0 ]; then
         echo "!!! WARNING: WordPress core files have been modified or checksums are missing."
-        echo "$CORE_STATUS" | jq -r '.[] | "File: $$.file), Status: $$.status)"' 2>/dev/null || echo "$CORE_STATUS"
+        echo "$CORE_STATUS" | jq -r '.[] | "File: \(.file), Status: \(.status)"' 2>/dev/null || echo "$CORE_STATUS"
       else
         echo "OK: Core file integrity verified."
       fi
 
       # 7.2 Plugin/Theme Status and Vulnerabilities
       echo " -> Checking plugin and theme status..."
-      PLUGIN_STATUS=$(wp plugin list --status=inactive --format=json 2>/dev/null)
+      PLUGIN_STATUS=$("${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" plugin list --status=inactive --format=json 2>/dev/null)
       if [ -n "$PLUGIN_STATUS" ] && [ "$PLUGIN_STATUS" != "[]" ]; then
         echo "!!! WARNING: Inactive plugins found (can be a security risk):"
-        echo "$PLUGIN_STATUS" | jq -r '.[] | " - $$.name) (v$$.version))"' 2>/dev/null || echo "$PLUGIN_STATUS"
+        echo "$PLUGIN_STATUS" | jq -r '.[] | " - \(.name) (v\(.version))"' 2>/dev/null || echo "$PLUGIN_STATUS"
       fi
-      THEME_STATUS=$(wp theme list --status=inactive --format=json 2>/dev/null)
+      THEME_STATUS=$("${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" theme list --status=inactive --format=json 2>/dev/null)
       if [ -n "$THEME_STATUS" ] && [ "$THEME_STATUS" != "[]" ]; then
         echo "!!! WARNING: Inactive themes found (should be removed):"
-        echo "$THEME_STATUS" | jq -r '.[] | " - $$.name) (v$$.version))"' 2>/dev/null || echo "$THEME_STATUS"
+        echo "$THEME_STATUS" | jq -r '.[] | " - \(.name) (v\(.version))"' 2>/dev/null || echo "$THEME_STATUS"
       fi
-      if wp cli has-command "plugin vulnerability" 2>/dev/null; then
+      if "${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" cli has-command "plugin vulnerability" 2>/dev/null; then
         echo " -> Checking for plugin vulnerabilities..."
-        VULN_REPORT=$(wp plugin vulnerability list --format=json 2>/dev/null)
+        VULN_REPORT=$("${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" plugin vulnerability list --format=json 2>/dev/null)
         VULN_COUNT=$(echo "$VULN_REPORT" | jq length 2>/dev/null || echo 0)
         if [ "$VULN_COUNT" -gt 0 ]; then
           echo "!!! WARNING: Found $VULN_COUNT plugin vulnerabilities:"
-          echo "$VULN_REPORT" | jq -r '.[] | " - $$.title) in $$.plugin) ($$.fixed_in // "no fix"))"' 2>/dev/null || echo "$VULN_REPORT"
+          echo "$VULN_REPORT" | jq -r '.[] | " - \(.title) in \(.plugin) (\(.fixed_in // \"no fix\"))"' 2>/dev/null || echo "$VULN_REPORT"
         fi
       fi
 
       # 7.3 User Security Check
       echo " -> Checking user security..."
-      ADMIN_USERS=$(wp user list --role=administrator --format=json 2>/dev/null)
-      if [ -n "$ADMIN_USERS" ]; then
+      ADMIN_USERS=$("${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" user list --role=administrator --format=json 2>/dev/null)
+      if [ -n "$ADMIN_USERS" ] && [ "$ADMIN_USERS" != "[]" ]; then
         echo "INFO: Administrator users found:"
-        echo "$ADMIN_USERS" | jq -r '.[] | " - $$.user_login) ($$.user_email))"' 2>/dev/null || echo "$ADMIN_USERS"
+        echo "$ADMIN_USERS" | jq -r '.[] | " - \(.user_login) (\(.user_email))"' 2>/dev/null || echo "$ADMIN_USERS"
       fi
-      NO_ROLE_USERS=$(wp user list --role= --format=json 2>/dev/null)
+      NO_ROLE_USERS=$("${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" user list --role= --format=json 2>/dev/null)
       if [ -n "$NO_ROLE_USERS" ] && [ "$NO_ROLE_USERS" != "[]" ]; then
         echo "!!! WARNING: Users with no assigned role found:"
-        echo "$NO_ROLE_USERS" | jq -r '.[] | " - $$.user_login) ($$.user_email))"' 2>/dev/null || echo "$NO_ROLE_USERS"
+        echo "$NO_ROLE_USERS" | jq -r '.[] | " - \(.user_login) (\(.user_email))"' 2>/dev/null || echo "$NO_ROLE_USERS"
       fi
 
       # 7.4 Database Status
       echo " -> Checking database status..."
-      DB_SIZE=$(wp db size --format=json 2>/dev/null)
+      DB_SIZE=$("${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" db size --format=json 2>/dev/null)
       if [ -n "$DB_SIZE" ]; then
-          echo "INFO: Database size: $(echo "$DB_SIZE" | jq -r '.size_human' 2>/dev/null || echo "$DB_SIZE")"
+        echo "INFO: Database size: $(echo "$DB_SIZE" | jq -r '.size_human' 2>/dev/null || echo "$DB_SIZE")"
       fi
 
       # 7.5 Suspicious Options
       echo " -> Checking for suspicious options..."
-      UPLOAD_PATH=$(wp option get upload_path --format=json 2>/dev/null)
-      if [ -n "$UPLOAD_PATH" ] && [ "$UPLOAD_PATH" != "null" ] && [ "$UPLOAD_PATH" != "wp-content/uploads" ]; then
+      UPLOAD_PATH=$("${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" option get upload_path --format=plaintext 2>/dev/null)
+      if [ -n "$UPLOAD_PATH" ] && [ "$UPLOAD_PATH" != "wp-content/uploads" ]; then
         echo "!!! WARNING: Custom upload_path detected: $UPLOAD_PATH"
       fi
     fi
@@ -1166,6 +1330,7 @@ echo " -> cURL hits (filtered):    $(summary_count_lines "$FILTERED_CURL")"
 echo " -> World-writable files:    $(summary_count_lines "$WRITABLE_FILES")"
 echo " -> Verification files:      $(summary_count_lines "$VERIFICATION_FILES")"
 echo " -> Access-log files flagged:$(summary_count_lines "$ACCESS_LOG_FILES")"
+echo " -> ModSecurity log files:   $(summary_count_lines "$MODSEC_LOG_FILES")"
 echo " -> Dyn-exec hits (filtered):$(summary_count_lines "$FILTERED_DYN_EXEC")"
 echo " -> One-liner hits (filt):   $(summary_count_lines "$FILTERED_ONELINER")"
 echo " -> Immutable files:         $(summary_count_lines "$IMMUTABLE_FILES")"
@@ -1184,6 +1349,11 @@ fi
 if [ -n "$ACCESS_LOG_FINDINGS" ]; then
   echo " -> Access log highlights (first ~20 lines across files):"
   echo "$ACCESS_LOG_FINDINGS" | head -20
+fi
+
+if [ -n "$MODSEC_LOG_FINDINGS" ]; then
+  echo " -> ModSecurity highlights (first ~20 lines across files):"
+  echo "$MODSEC_LOG_FINDINGS" | head -20
 fi
 
 
@@ -1238,6 +1408,7 @@ if [ "$JSON_OUTPUT" -eq 1 ]; then
   PERMS_COUNT=$(count_lines "$WRITABLE_FILES")
   VERIF_COUNT=$(count_lines "$VERIFICATION_FILES")
   ACCESS_LOG_COUNT=$(count_lines "$ACCESS_LOG_FILES")
+  MODSEC_LOG_COUNT=$(count_lines "$MODSEC_LOG_FILES")
   DYN_EXEC_COUNT=$(count_lines "$FILTERED_DYN_EXEC")
   ONELINER_COUNT=$(count_lines "$FILTERED_ONELINER")
   IMMUTABLE_COUNT=$(count_lines "$IMMUTABLE_FILES")
@@ -1261,6 +1432,7 @@ if [ "$JSON_OUTPUT" -eq 1 ]; then
   echo "  \"perms_world_writable\": $PERMS_COUNT,"
   echo "  \"verification_files\": $VERIF_COUNT,"
   echo "  \"access_logs\": $ACCESS_LOG_COUNT,"
+  echo "  \"modsec_logs\": $MODSEC_LOG_COUNT,"
   echo "  \"dyn_exec\": $DYN_EXEC_COUNT,"
   echo "  \"oneliner\": $ONELINER_COUNT,"
   echo "  \"immutable\": $IMMUTABLE_COUNT,"
