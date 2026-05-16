@@ -481,17 +481,23 @@ fi
 if [ "$DO_UPLOADS" -eq 1 ]; then
   UPLOADS_DIR="$SITE_PATH/wp-content/uploads"
   if [ -d "$UPLOADS_DIR" ]; then
-    # FIX: Use a while loop with process redirection to avoid subshell issues.
+    # Use a temporary file and avoid piping into a subshell so variables remain available.
     echo " -> Checking for non-month directories in uploads..."
     FAKE_MONTH_DIRS=""
-    find "$UPLOADS_DIR" -maxdepth 2 -type d -name "[0-9]*" -print 2>/dev/null | while IFS= read -r DIR; do
+    if command -v mktemp >/dev/null 2>&1; then
+      FAKE_MONTH_DIRS_FILE=$(mktemp -t wp-scan-fake-months-XXXXXX.txt)
+    else
+      FAKE_MONTH_DIRS_FILE="$SITE_PATH/wp-scan-fake-months.txt"
+      : > "$FAKE_MONTH_DIRS_FILE"
+    fi
+    while IFS= read -r DIR; do
       BASENAME=$(basename "$DIR")
       # months are typically 01-12
       if [[ "$BASENAME" =~ ^[0-9]+$ ]] && ! [[ "$BASENAME" =~ ^(0[1-9]|1[0-2])$ ]]; then
-        echo "$DIR"
+        printf "%s\n" "$DIR" >> "$FAKE_MONTH_DIRS_FILE"
       fi
-    done | sort > "${FAKE_MONTH_DIRS_FILE:=$(mktemp)}"
-    FAKE_MONTH_DIRS=$(cat "${FAKE_MONTH_DIRS_FILE}")
+    done < <(find "$UPLOADS_DIR" -maxdepth 2 -type d -name "[0-9]*" -print 2>/dev/null)
+    FAKE_MONTH_DIRS=$(cat "$FAKE_MONTH_DIRS_FILE" 2>/dev/null || true)
 
     if [ -n "$FAKE_MONTH_DIRS" ]; then
       echo "!!! WARNING: Found non-month directories in uploads (possible backdoors):"
@@ -1324,6 +1330,20 @@ fi
 
 # --- Human-friendly summary (always shown) ---
 summary_count_lines() { printf "%s\n" "$1" | sed '/^\s*$/d' | wc -l | awk '{print $1}'; }
+
+# Convert a newline-delimited shell variable into a JSON array safely-ish.
+# This is a lightweight helper that escapes backslashes and quotes and wraps
+# each line in quotes. It is not a full JSON encoder but is adequate for
+# simple file paths and messages.
+to_json_array() {
+  local v="$1"
+  if [ -z "$v" ]; then
+    echo "[]"
+    return
+  fi
+  # Escape backslashes and quotes, then wrap lines in quotes and join with commas
+  printf "%s\n" "$v" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/  \"/' -e 's/$/\"/' | paste -sd ",\n" - | sed '1s/^/[\n/; $ s/$/\n]/'
+}
 SUMMARY_WARN=$(grep -c "!!! WARNING" "$LOG_FILE" 2>/dev/null || true)
 SUMMARY_WARN=${SUMMARY_WARN:-0}
 SUMMARY_STATUS="OK"; [ "$SUMMARY_WARN" -gt 0 ] && SUMMARY_STATUS="WARNINGS"
@@ -1462,6 +1482,13 @@ if [ "$JSON_OUTPUT" -eq 1 ]; then
   echo "  \"oneliner\": $ONELINER_COUNT,"
   echo "  \"immutable\": $IMMUTABLE_COUNT,"
   echo "  \"wp_cli\": $WP_CLI_COUNT"
+  echo " },"
+  echo " \"lists\": {"
+  echo "  \"recent_files\": $(to_json_array "$RECENT_FILES"),"
+  echo "  \"uploads_php_files\": $(to_json_array "$UPLOADS_PHP_FILES"),"
+  echo "  \"possible_hack_files\": $(to_json_array "$POSSIBLE_HACK_FILES"),"
+  echo "  \"access_log_files\": $(to_json_array "$ACCESS_LOG_FILES"),"
+  echo "  \"modsec_log_files\": $(to_json_array "$MODSEC_LOG_FILES")"
   echo " }"
   echo "}"
 fi
