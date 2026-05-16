@@ -84,6 +84,11 @@ REMOTE_MODE=0
 SITE_URL=""
 DRY_RUN=0
 VERBOSITY=1
+# Output formats
+SARIF_FILE=""
+CSV_FILE=""
+# Internal signature file path (default)
+SIGNATURES_FILE="${SIGNATURES_DIR:-$SCRIPT_DIR/signatures}/latest-signatures.txt"
 
 ARG_SITE=""
 
@@ -241,6 +246,8 @@ while [ $# -gt 0 ]; do
     --url) SITE_URL="$2"; REMOTE_MODE=1; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -v|--verbose) VERBOSITY=$((VERBOSITY+1)); shift ;;
+    --sarif) SARIF_FILE="$2"; shift 2 ;;
+    --csv) CSV_FILE="$2"; shift 2 ;;
     --no-recent) clear_module_flag recent; shift ;;
     --suspicious) enter_only_mode_if_needed; set_module_flag suspicious; shift ;;
     --no-suspicious) clear_module_flag suspicious; shift ;;
@@ -1141,6 +1148,72 @@ if [ "$DO_PHPSHELL" -eq 1 ]; then
   fi
 
   echo " -> Searching for stealth toggles (error_reporting(0), set_time_limit(0), @eval, etc.)..."
+fi
+
+# --- Signature-fed rule checks (apply user-provided signatures) ---
+if [ "$REMOTE_MODE" -eq 0 ] && [ -f "$SIGNATURES_FILE" ]; then
+  echo "\n[+] Applying signature rules from: $SIGNATURES_FILE"
+  SIGNATURE_MATCHES=""
+  SIG_RESULTS_FILE=$(mktemp -t wp-scan-sigresults-XXXXXX.txt)
+  sig_counter=0
+  while IFS= read -r sig; do
+    sig_trim=$(echo "$sig" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [ -z "$sig_trim" ] && continue
+    case "$sig_trim" in
+      \#*) continue ;;
+    esac
+
+    # New signature format (backwards compatible):
+    # ruleId|severity|pattern|description
+    # If the line does not contain '|', treat as legacy ERE pattern.
+    if echo "$sig_trim" | grep -q "|"; then
+      IFS='|' read -r rule_id severity pattern description <<< "$sig_trim"
+      rule_id=$(echo "$rule_id" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+      severity=$(echo "$severity" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+      pattern=$(echo "$pattern" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+      description=$(echo "$description" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    else
+      rule_id="legacy-$sig_counter"
+      severity="warning"
+      pattern="$sig_trim"
+      description="legacy-pattern"
+      sig_counter=$((sig_counter+1))
+    fi
+
+    matches=$(grep -R -n -I --include="*.php" -E "$pattern" "$SITE_PATH" 2>/dev/null || true)
+    if [ -n "$matches" ]; then
+      # write enriched match lines to results file: path:lineno:match_text:ruleId:severity:description
+      printf "%s\n" "$matches" | while IFS= read -r mline; do
+        echo "${mline}:${rule_id}:${severity}:${description}" >> "$SIG_RESULTS_FILE"
+      done
+    fi
+  done < "$SIGNATURES_FILE"
+
+  if [ -s "$SIG_RESULTS_FILE" ]; then
+    echo "!!! WARNING: Signature rules matched files (showing first 50 matches):"
+    head -n 50 "$SIG_RESULTS_FILE"
+    # Add matched files to candidate lists
+    cut -d: -f1 "$SIG_RESULTS_FILE" | sort -u | while IFS= read -r f; do
+      ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$f")
+      POSSIBLE_HACK_FILES=$(printf "%s\n%s\n" "$POSSIBLE_HACK_FILES" "$f")
+    done
+
+    # Emit SARIF/CSV if requested (SIG_RESULTS_FILE contains enriched fields)
+    if [ -n "$SARIF_FILE" ]; then
+      if declare -f emit_sarif >/dev/null 2>&1; then
+        emit_sarif "$SARIF_FILE" "$SIG_RESULTS_FILE"
+      fi
+    fi
+    if [ -n "$CSV_FILE" ]; then
+      if declare -f emit_csv >/dev/null 2>&1; then
+        emit_csv "$CSV_FILE" "$SIG_RESULTS_FILE"
+      fi
+    fi
+  else
+    echo "OK: No signature rule matches found."
+    rm -f "$SIG_RESULTS_FILE" 2>/dev/null || true
+  fi
+fi
   STEALTH_PATTERN="error_reporting\\s*\\(\\s*0\\s*\\)|set_time_limit\\s*\\(\\s*0\\s*\\)|ini_set\\s*\\(\\s*['\"]display_errors['\"]\\s*,\\s*0\\s*\\)|@\\s*(eval|assert|system|exec|shell_exec|passthru)\\b"
   STEALTH_MATCH=$(grep -R -l -I --include="*.php" -E "$STEALTH_PATTERN" "$SITE_PATH" 2>/dev/null)
   if [ -n "$STEALTH_MATCH" ]; then
@@ -1497,6 +1570,43 @@ to_json_array() {
   fi
   # Escape backslashes and quotes, then wrap lines in quotes and join with commas
   printf "%s\n" "$v" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/  \"/' -e 's/$/\"/' | paste -sd ",\n" - | sed '1s/^/[\n/; $ s/$/\n]/'
+}
+
+# Emit a minimal SARIF v2.1.0 report capturing files with findings.
+emit_sarif() {
+  local out="$1"
+  # Build results from POSSIBLE_HACK_FILES and ACCESS_LOG_FINDINGS / MODSEC_LOG_FINDINGS
+  echo "{\n  \"version\": \"2.1.0\",\n  \"runs\": [\n    {\n      \"tool\": {\"driver\": {\"name\": \"wp-scan\"}},\n      \"results\": [" > "$out"
+  # Add file-based results
+  if [ -n "$POSSIBLE_HACK_FILES" ]; then
+    printf "%s\n" "$POSSIBLE_HACK_FILES" | sed '/^\s*$/d' | sort -u | while IFS= read -r f; do
+      # include a result with just the file path
+      echo "        {\"ruleId\": \"possible-hack\", \"message\": {\"text\": \"High-signal match: $f\"}, \"locations\": [{\"physicalLocation\": {\"artifactLocation\": {\"uri\": \"$f\"}}}] }," >> "$out"
+    done
+  fi
+  # Trim trailing comma and close JSON
+  # Remove last comma safely
+  perl -0777 -pe 's/,\s*\z/\n/' -i "$out" 2>/dev/null || true
+  echo "      ]\n    }\n  ]\n}" >> "$out"
+  echo "SARIF written to: $out"
+}
+
+# Emit a simple CSV with file,module,message
+emit_csv() {
+  local out="$1"
+  echo "file,module,message" > "$out"
+  if [ -n "$POSSIBLE_HACK_FILES" ]; then
+    printf "%s\n" "$POSSIBLE_HACK_FILES" | sed '/^\s*$/d' | sort -u | while IFS= read -r f; do
+      echo "\"$f\",\"possible-hack\",\"High-signal match\"" >> "$out"
+    done
+  fi
+  # Include access log findings as extra rows
+  if [ -n "$ACCESS_LOG_FILES" ]; then
+    printf "%s\n" "$ACCESS_LOG_FILES" | sed '/^\s*$/d' | sort -u | while IFS= read -r f; do
+      echo "\"$f\",\"access-log\",\"Suspicious access log patterns\"" >> "$out"
+    done
+  fi
+  echo "CSV written to: $out"
 }
 SUMMARY_WARN=$(grep -c "!!! WARNING" "$LOG_FILE" 2>/dev/null || true)
 SUMMARY_WARN=${SUMMARY_WARN:-0}

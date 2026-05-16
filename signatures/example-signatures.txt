@@ -1,8 +1,13 @@
 # Example signature rules for wp-scan
-# Lines starting with '#' are comments. This is a simple newline-delimited list of patterns.
-# Example: flag files named suspicious.php
-suspicious.php
-# Pattern: look for eval usage
-\beval\b
-# Pattern: base64 decode usage
-\bbase64_decode\b
+# New format (pipe-separated): ruleId|severity|pattern|description
+# Fields:
+#  - ruleId: short identifier (e.g., SHELL_C99)
+#  - severity: info|warning|high|error
+#  - pattern: ERE used to match inside PHP files (grep -E)
+#  - description: brief human-friendly description
+# Lines beginning with '#' are comments. Legacy single-pattern lines (no pipes) are still supported.
+
+SHELL_C99|high|C99Shell|Known C99-like web shell UI strings
+EVAL_USE|warning|\beval\b|Use of eval() - high risk
+BASE64_DECODE|warning|\bbase64_decode\b|Base64 decoding often used by loaders/stagers
+SUSPICIOUS_FILENAME|info|suspicious\.php|Filename matched as suspicious

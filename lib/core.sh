@@ -359,63 +359,91 @@ output_json_if_requested() {
 }
 
 emit_csv() {
-    # emit_csv <csv_file> <file_list>
+    # emit_csv <csv_file> <results_file>
     local csv_file="$1"; shift || true
-    local file_list="$1"; shift || true
+    local results_file="$1"; shift || true
     [ -n "$csv_file" ] || return 0
-    if [ ! -f "$file_list" ]; then
-        echo "CSV emission skipped: file list not found: $file_list"
+    if [ ! -f "$results_file" ]; then
+        echo "CSV emission skipped: file list not found: $results_file"
         return 0
     fi
 
     {
-        echo "file,module,message"
-        while IFS= read -r f; do
-            printf '%s,%s,%s\n' "$f" "wp-scan" "flagged" 
-        done < "$file_list"
+        echo "file,line,ruleId,severity,description,message"
+        while IFS= read -r line; do
+            # Parse enriched format: path:lineno:match_text:ruleId:severity:description
+            file=$(printf '%s' "$line" | awk -F ':' '{print $1}')
+            lineno=$(printf '%s' "$line" | awk -F ':' '{print $2}')
+            ruleId=$(printf '%s' "$line" | awk -F ':' '{print $(NF-2)}')
+            severity=$(printf '%s' "$line" | awk -F ':' '{print $(NF-1)}')
+            description=$(printf '%s' "$line" | awk -F ':' '{print $NF}')
+            # message is content between the second field and the last three fields
+            message=$(printf '%s' "$line" | sed -E 's/^[^:]+:[0-9]+:(.*):[^:]+:[^:]+:[^:]+$/\1/')
+            # Escape double quotes in message
+            message=$(printf '%s' "$message" | sed 's/"/""/g')
+            printf '"%s",%s,"%s","%s","%s","%s"\n' "$file" "$lineno" "$ruleId" "$severity" "$description" "$message"
+        done < "$results_file"
     } > "$csv_file"
     echo "CSV report written: $csv_file"
 }
 
 emit_sarif() {
-    # emit_sarif <sarif_file> <file_list>
+    # emit_sarif <sarif_file> <results_file>
     local sarif_file="$1"; shift || true
-    local file_list="$1"; shift || true
+    local results_file="$1"; shift || true
     [ -n "$sarif_file" ] || return 0
-    if [ ! -f "$file_list" ]; then
-        echo "SARIF emission skipped: file list not found: $file_list"
+    if [ ! -f "$results_file" ]; then
+        echo "SARIF emission skipped: file list not found: $results_file"
         return 0
     fi
 
-    # Minimal SARIF v2.1.0 skeleton with one run and results for each file
-    local results
-    results="[]"
-    while IFS= read -r f; do
-        # create a simple result object
-        # escape backslashes and quotes in filename
-        esc=$(printf '%s' "$f" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
-        results=$(printf '%s' "$results" | jq -c --arg file "$esc" '. += [{"ruleId":"wp-scan","level":"warning","message":{"text":"flagged by wp-scan"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":$file}}]} }]')
-    done < "$file_list"
-
-    # If jq is not available, fallback to a very small handcrafted JSON (best-effort)
+    # Build results as a JSON array. Use jq when available for correctness.
     if command -v jq >/dev/null 2>&1; then
-        jq -n --argjson results "$results" '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"wp-scan"}},"results":$results}]}' > "$sarif_file"
+        # Start with empty results
+        local results_json
+        results_json="[]"
+        while IFS= read -r line; do
+            file=$(printf '%s' "$line" | awk -F ':' '{print $1}')
+            lineno=$(printf '%s' "$line" | awk -F ':' '{print $2}')
+            ruleId=$(printf '%s' "$line" | awk -F ':' '{print $(NF-2)}')
+            severity=$(printf '%s' "$line" | awk -F ':' '{print $(NF-1)}')
+            description=$(printf '%s' "$line" | awk -F ':' '{print $NF}')
+            message=$(printf '%s' "$line" | sed -E 's/^[^:]+:[0-9]+:(.*):[^:]+:[^:]+:[^:]+$/\1/')
+            # Determine SARIF level
+            if [ "$severity" = "error" ] || [ "$severity" = "high" ]; then
+                level="error"
+            else
+                level="warning"
+            fi
+            # Append to results_json
+            results_json=$(printf '%s' "$results_json" | jq -c --arg file "$file" --argjson startLine "$lineno" --arg ruleId "$ruleId" --arg level "$level" --arg description "$description" --arg message "$message" '. += [{"ruleId":$ruleId,"level":$level,"message":{"text":$message},"locations":[{"physicalLocation":{"artifactLocation":{"uri":$file},"region":{"startLine":$startLine}}}],"properties":{"description":$description}}]')
+        done < "$results_file"
+
+        jq -n --argjson results "$results_json" '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"wp-scan"}},"results":$results}]}' > "$sarif_file"
+        echo "SARIF report written: $sarif_file"
     else
-        # naive JSON assembly
+        # Fallback: simple SARIF-like JSON with minimal fields (best-effort)
         echo '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"wp-scan"}},"results":[' > "$sarif_file"
         first=1
-        while IFS= read -r f; do
-            esc=$(printf '%s' "$f" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+        while IFS= read -r line; do
+            file=$(printf '%s' "$line" | awk -F ':' '{print $1}')
+            lineno=$(printf '%s' "$line" | awk -F ':' '{print $2}')
+            ruleId=$(printf '%s' "$line" | awk -F ':' '{print $(NF-2)}')
+            severity=$(printf '%s' "$line" | awk -F ':' '{print $(NF-1)}')
+            description=$(printf '%s' "$line" | awk -F ':' '{print $NF}')
+            message=$(printf '%s' "$line" | sed -E 's/^[^:]+:[0-9]+:(.*):[^:]+:[^:]+:[^:]+$/\1/')
             if [ "$first" -eq 1 ]; then
                 first=0
             else
                 echo ',' >> "$sarif_file"
             fi
-            echo "{\"ruleId\":\"wp-scan\",\"level\":\"warning\",\"message\":{\"text\":\"flagged by wp-scan\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"${esc}\"}}}] }" >> "$sarif_file"
-        done < "$file_list"
+            esc_msg=$(printf '%s' "$message" | sed 's/"/\\"/g')
+            esc_file=$(printf '%s' "$file" | sed 's/"/\\"/g')
+            echo "{\"ruleId\":\"${ruleId}\",\"level\":\"${severity}\",\"message\":{\"text\":\"${esc_msg}\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"${esc_file}\"},\"region\":{\"startLine\":${lineno}}}}]}" >> "$sarif_file"
+        done < "$results_file"
         echo ']}}]}' >> "$sarif_file"
+        echo "SARIF report written (best-effort): $sarif_file"
     fi
-    echo "SARIF report written: $sarif_file"
 }
 
 zip_flagged_files_if_requested() {
