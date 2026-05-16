@@ -1,0 +1,16 @@
+name: Validate Signatures
+
+on: [push, pull_request]
+
+jobs:
+  signatures-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare signatures
+        run: |
+          mkdir -p signatures
+          cp signatures/example-signatures.txt signatures/latest-signatures.txt || true
+      - name: Run signature validator
+        run: |
+          bash validate-signatures.sh signatures/latest-signatures.txt

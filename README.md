@@ -274,6 +274,14 @@ Notes specific to sleepyhosting examples:
 - The WP-CLI module requires the `wp` command to be installed and accessible.
 - The immutable file check requires the `lsattr` command and only works on filesystems that support extended attributes (like ext4).
 
+## Signatures validation
+
+When using `--update-signatures`, downloaded signature feeds are validated locally for common formatting errors. A small validation script (validate-signatures.sh) checks each non-comment line for either a legacy ERE pattern (single value) or the new pipe-separated format:
+
+ruleId|severity|pattern|description
+
+Accepted severity values: info, low, medium, high, critical, warning, error. If validation fails the downloaded file is removed and the update exits with a non-zero status.
+
 ## Changelog
 
 - **2026‑01‑09**: Added ModSecurity log scanning (`--modsec-logs`) and included results in Summary/JSON output.

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- feat: validate signatures on update and add CI check (validate-signatures.yml)
 - refactor: consolidate helpers into lib/ and make wp-scan.sh a thin wrapper delegating to wp-scan-mod.sh
 - fix: enable strict mode (set -euo pipefail) and add error handler
 - fix: correct several shell bugs (stray $$ in find, lsattr parsing, sed regex typos)

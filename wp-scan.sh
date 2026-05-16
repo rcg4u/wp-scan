@@ -443,6 +443,17 @@ update_signatures() {
     echo "[WARN] No HTTP download tool (curl/wget) available; cannot update signatures."
     return 1
   fi
+
+  # Validate downloaded signatures (best-effort). If a validator is present, use it.
+  VALIDATOR="${SCRIPT_DIR:-.}/validate-signatures.sh"
+  if [ -x "$VALIDATOR" ] || command -v bash >/dev/null 2>&1; then
+    if ! bash "$VALIDATOR" "$SIGNATURES_DIR/latest-signatures.txt"; then
+      echo "[WARN] Signature validation failed; removing downloaded file."
+      rm -f "$SIGNATURES_DIR/latest-signatures.txt" 2>/dev/null || true
+      return 2
+    fi
+  fi
+
   echo "[+] Signatures saved to: $SIGNATURES_DIR/latest-signatures.txt"
   return 0
 }
