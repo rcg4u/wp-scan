@@ -76,6 +76,9 @@ New features added:
 - `--exit-code <binary|count>`: exit 0/1 in binary mode or return the warning count (capped to 254)
 - `--with-cache`: include `wp-content/cache` in the recent files scan (excluded by default)
 - `--zip <filename.zip>`: create a zip archive containing flagged files (recent changes, PHP shells, backdoor/obfuscation matches, hidden dotfiles, superglobal patterns, verification files, uploads PHP, world‑writable, filtered cURL, dynamic execution, one-liner shells, immutable files). Entries use absolute paths, and a `wp-scan-manifest.txt` is included listing all full paths for easy reference.
+- `--dry-run`: show actions that would be taken (archives, signature updates) without modifying files or creating archives
+- `--sarif <file>`: write a minimal SARIF v2.1.0 report containing flagged file locations
+- `--csv <file>`: write a simple CSV report (file,module,message) for consumption by triage tools
 - `--exclude-ips-file <file>`: file containing IPs to exclude from access-log *results* (one IP per line; `#` comments allowed)
 - `--scan-all`: force-enable all modules for this run (overrides default non‑WP exclusions)
 

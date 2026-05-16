@@ -13,3 +13,4 @@
 - feat: add signatures feed and --update-signatures command
 - feat: add remote HTTP scan mode (--url) and lightweight remote checks
 - feat: add --dry-run and --verbose flags
+- feat: zip creation respects --dry-run; add --sarif and --csv report emitters (minimal SARIF/CSV outputs)

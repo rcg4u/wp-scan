@@ -14,6 +14,11 @@ SITE_PATH=""
 SITE_OWNER=""
 LOG_FILE=""
 ZIP_CANDIDATES=""
+# Remote / runtime flags
+DRY_RUN=0
+SARIF_FILE=""
+CSV_FILE=""
+SIGNATURES_FILE="${SIGNATURES_DIR:-$(dirname "$0")/../signatures}/latest-signatures.txt"
 
 # WordPress mode (default on). Disable with --no-wordpress
 WP_MODE=1
@@ -212,6 +217,9 @@ parse_args() {
             --no-oneliner) EXPLICIT_MODULE_SELECTION=1; clear_module_flag oneliner; shift ;;
             --wp-cli) EXPLICIT_MODULE_SELECTION=1; DO_WP_CLI=1; shift ;;
             --no-wp-cli) EXPLICIT_MODULE_SELECTION=1; DO_WP_CLI=0; shift ;;
+            --dry-run) DRY_RUN=1; shift ;;
+            --sarif) SARIF_FILE="$2"; shift 2 ;;
+            --csv) CSV_FILE="$2"; shift 2 ;;
 
             -h|--help)
                 usage
@@ -350,6 +358,66 @@ output_json_if_requested() {
     echo "}"
 }
 
+emit_csv() {
+    # emit_csv <csv_file> <file_list>
+    local csv_file="$1"; shift || true
+    local file_list="$1"; shift || true
+    [ -n "$csv_file" ] || return 0
+    if [ ! -f "$file_list" ]; then
+        echo "CSV emission skipped: file list not found: $file_list"
+        return 0
+    fi
+
+    {
+        echo "file,module,message"
+        while IFS= read -r f; do
+            printf '%s,%s,%s\n' "$f" "wp-scan" "flagged" 
+        done < "$file_list"
+    } > "$csv_file"
+    echo "CSV report written: $csv_file"
+}
+
+emit_sarif() {
+    # emit_sarif <sarif_file> <file_list>
+    local sarif_file="$1"; shift || true
+    local file_list="$1"; shift || true
+    [ -n "$sarif_file" ] || return 0
+    if [ ! -f "$file_list" ]; then
+        echo "SARIF emission skipped: file list not found: $file_list"
+        return 0
+    fi
+
+    # Minimal SARIF v2.1.0 skeleton with one run and results for each file
+    local results
+    results="[]"
+    while IFS= read -r f; do
+        # create a simple result object
+        # escape backslashes and quotes in filename
+        esc=$(printf '%s' "$f" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+        results=$(printf '%s' "$results" | jq -c --arg file "$esc" '. += [{"ruleId":"wp-scan","level":"warning","message":{"text":"flagged by wp-scan"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":$file}}]} }]')
+    done < "$file_list"
+
+    # If jq is not available, fallback to a very small handcrafted JSON (best-effort)
+    if command -v jq >/dev/null 2>&1; then
+        jq -n --argjson results "$results" '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"wp-scan"}},"results":$results}]}' > "$sarif_file"
+    else
+        # naive JSON assembly
+        echo '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"wp-scan"}},"results":[' > "$sarif_file"
+        first=1
+        while IFS= read -r f; do
+            esc=$(printf '%s' "$f" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+            if [ "$first" -eq 1 ]; then
+                first=0
+            else
+                echo ',' >> "$sarif_file"
+            fi
+            echo "{\"ruleId\":\"wp-scan\",\"level\":\"warning\",\"message\":{\"text\":\"flagged by wp-scan\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"${esc}\"}}}] }" >> "$sarif_file"
+        done < "$file_list"
+        echo ']}}]}' >> "$sarif_file"
+    fi
+    echo "SARIF report written: $sarif_file"
+}
+
 zip_flagged_files_if_requested() {
     [ "$ZIP_ENABLED" -eq 1 ] || return 0
 
@@ -358,10 +426,11 @@ zip_flagged_files_if_requested() {
         return 0
     fi
 
-    echo "Creating zip archive of flagged files: $ZIP_TARGET_ZIP"
+    echo "Preparing zip archive of flagged files: $ZIP_TARGET_ZIP"
     local FILE_LIST
     FILE_LIST=$(mktemp -t wp-scan-ziplist-XXXXXX.txt)
 
+    # Normalize input and collect existing files
     printf "%s\n" "$ZIP_CANDIDATES" | sed '/^\s*$/d' | while IFS= read -r p; do
         [ -f "$p" ] && echo "$p"
     done | sort -u > "$FILE_LIST"
@@ -370,24 +439,37 @@ zip_flagged_files_if_requested() {
     COUNT=$(wc -l < "$FILE_LIST" | awk '{print $1}')
 
     if [ "$COUNT" -gt 0 ]; then
-        zip -@ "$ZIP_TARGET_ZIP" < "$FILE_LIST"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            echo "DRY-RUN: would create zip: $ZIP_TARGET_ZIP with $COUNT files (showing first 20):"
+            head -n 20 "$FILE_LIST" || true
+        else
+            zip -@ "$ZIP_TARGET_ZIP" < "$FILE_LIST"
 
-        local MANIFEST_TMP
-        MANIFEST_TMP=$(mktemp -t wp-scan-manifest-XXXXXX.txt)
-        {
-            echo "wp-scan manifest"
-            echo "site: $SITE_PATH"
-            echo "created: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "files:"
-            cat "$FILE_LIST"
-        } > "$MANIFEST_TMP"
+            local MANIFEST_TMP
+            MANIFEST_TMP=$(mktemp -t wp-scan-manifest-XXXXXX.txt)
+            {
+                echo "wp-scan manifest"
+                echo "site: $SITE_PATH"
+                echo "created: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                echo "files:"
+                cat "$FILE_LIST"
+            } > "$MANIFEST_TMP"
 
-        local MANIFEST_NAME="wp-scan-manifest.txt"
-        cp "$MANIFEST_TMP" "$MANIFEST_NAME"
-        zip "$ZIP_TARGET_ZIP" "$MANIFEST_NAME" >/dev/null 2>&1
-        rm -f "$MANIFEST_NAME" "$MANIFEST_TMP"
+            local MANIFEST_NAME="wp-scan-manifest.txt"
+            cp "$MANIFEST_TMP" "$MANIFEST_NAME"
+            zip "$ZIP_TARGET_ZIP" "$MANIFEST_NAME" >/dev/null 2>&1
+            rm -f "$MANIFEST_NAME" "$MANIFEST_TMP"
 
-        echo "Zip created ($COUNT files): $ZIP_TARGET_ZIP (includes $MANIFEST_NAME)"
+            echo "Zip created ($COUNT files): $ZIP_TARGET_ZIP (includes $MANIFEST_NAME)"
+        fi
+
+        # Emit SARIF/CSV if requested
+        if [ -n "$SARIF_FILE" ]; then
+            emit_sarif "$SARIF_FILE" "$FILE_LIST"
+        fi
+        if [ -n "$CSV_FILE" ]; then
+            emit_csv "$CSV_FILE" "$FILE_LIST"
+        fi
     else
         echo "No files to zip. Archive not created."
     fi
