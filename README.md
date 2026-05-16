@@ -56,6 +56,9 @@ New features added:
 - More robust uploads directory scanning (avoids subshell variable scoping issues)
 - Improved JSON output with per-module file lists
 - Helpers to convert lists into JSON arrays for machine consumption
+- Remote HTTP scan mode: use --url <site-url> to perform lightweight remote checks (meta generator, common endpoints)
+- Dry-run mode: --dry-run to show what would be done without making changes
+- Verbosity: -v/--verbose to increase verbosity
 
 
 ### Options

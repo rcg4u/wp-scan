@@ -79,6 +79,12 @@ EMAIL_TO="${WP_SCAN_EMAIL_TO:-}"
 EMAIL_FROM="${WP_SCAN_EMAIL_FROM:-}"
 EMAIL_SUBJECT="${WP_SCAN_EMAIL_SUBJECT:-}"
 EMAIL_ALWAYS="${WP_SCAN_EMAIL_ALWAYS:-0}"
+# Remote scan / run mode
+REMOTE_MODE=0
+SITE_URL=""
+DRY_RUN=0
+VERBOSITY=1
+
 ARG_SITE=""
 
 # Optional allowlist for known-good site verification files.
@@ -232,6 +238,9 @@ while [ $# -gt 0 ]; do
     --signatures-url) SIGNATURES_URL="$2"; shift 2 ;;
     --signatures-dir) SIGNATURES_DIR="$2"; shift 2 ;;
     --recent) enter_only_mode_if_needed; set_module_flag recent; shift ;;
+    --url) SITE_URL="$2"; REMOTE_MODE=1; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -v|--verbose) VERBOSITY=$((VERBOSITY+1)); shift ;;
     --no-recent) clear_module_flag recent; shift ;;
     --suspicious) enter_only_mode_if_needed; set_module_flag suspicious; shift ;;
     --no-suspicious) clear_module_flag suspicious; shift ;;
@@ -293,34 +302,52 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ -z "$ARG_SITE" ]; then
-  # No arguments provided: show help and exit
+if [ -z "$ARG_SITE" ] && [ "$REMOTE_MODE" -eq 0 ]; then
+  # No arguments provided and not in remote mode: show help and exit
   echo "Usage: $0 [options] /path/to/site/root"
   echo "Run with --help to see all options."
   exit 0
 fi
 
-# Assign the site argument to a variable and sanitize it.
-SITE_PATH=$(realpath "$ARG_SITE")
-
-# Check if the provided path actually exists and is a directory.
-if [ ! -d "$SITE_PATH" ]; then
-  echo "Error: Directory '$SITE_PATH' not found."
-  exit 1
-fi
-
-# Check if it looks like a WordPress installation.
-if [ "$WP_MODE" -eq 1 ]; then
-  if [ ! -f "$SITE_PATH/wp-config.php" ]; then
-    echo "Error: wp-config.php not found in '$SITE_PATH'. Is this a WordPress root?"
+# If remote mode is enabled, validate URL; otherwise sanitize local path
+if [ "$REMOTE_MODE" -eq 1 ]; then
+  if [ -n "$ARG_SITE" ]; then
+    echo "[WARN] Both local path and --url provided. Remote mode takes precedence."
+  fi
+  # Basic URL normalization (remove trailing slash)
+  SITE_URL="${SITE_URL%/}"
+  if [ -z "$SITE_URL" ]; then
+    echo "Error: --url requires a non-empty URL."
     exit 1
   fi
+  echo "Running in remote HTTP scan mode for: $SITE_URL"
 else
-  echo "[Info] Non-WordPress mode: skipping wp-config.php check."
+  # Assign the site argument to a variable and sanitize it.
+  SITE_PATH=$(realpath "$ARG_SITE")
+
+  # Check if the provided path actually exists and is a directory.
+  if [ ! -d "$SITE_PATH" ]; then
+    echo "Error: Directory '$SITE_PATH' not found."
+    exit 1
+  fi
+
+  # Check if it looks like a WordPress installation.
+  if [ "$WP_MODE" -eq 1 ]; then
+    if [ ! -f "$SITE_PATH/wp-config.php" ]; then
+      echo "Error: wp-config.php not found in '$SITE_PATH'. Is this a WordPress root?"
+      exit 1
+    fi
+  else
+    echo "[Info] Non-WordPress mode: skipping wp-config.php check."
+  fi
 fi
 
 echo "=========================================================================="
-echo "Starting Generic WordPress Security Scan for: $SITE_PATH"
+if [ "$REMOTE_MODE" -eq 1 ]; then
+  echo "Starting Generic WordPress HTTP Security Scan for: $SITE_URL"
+else
+  echo "Starting Generic WordPress Security Scan for: $SITE_PATH"
+fi
 echo "=========================================================================="
 
 
@@ -491,20 +518,37 @@ if [ "$WP_MODE" -eq 0 ] && [ "$SCAN_ALL" -eq 0 ]; then
 fi
 
 
-# --- 1. Check for Recently Modified Files ---
-if [ "$DO_RECENT" -eq 1 ]; then
-  echo -e "\n[+] Checking for recently modified files (any type) in the last 60 minutes..."
-  if [ "$EXCLUDE_CACHE" -eq 1 ]; then
-    RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 -not -path "*/wp-content/cache/*" 2>/dev/null)
-  else
-    RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 2>/dev/null)
+# --- 1. Check for Recently Modified Files (local) or remote equivalents ---
+if [ "$REMOTE_MODE" -eq 0 ]; then
+  if [ "$DO_RECENT" -eq 1 ]; then
+    echo -e "\n[+] Checking for recently modified files (any type) in the last 60 minutes..."
+    if [ "$EXCLUDE_CACHE" -eq 1 ]; then
+      RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 -not -path "*/wp-content/cache/*" 2>/dev/null)
+    else
+      RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 2>/dev/null)
+    fi
+    if [ -n "$RECENT_FILES" ]; then
+      echo "!!! WARNING: Recently modified files found. Please review them:"
+      echo "$RECENT_FILES"
+      ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$RECENT_FILES")
+    else
+      echo "OK: No recently modified files found."
+    fi
   fi
-  if [ -n "$RECENT_FILES" ]; then
-    echo "!!! WARNING: Recently modified files found. Please review them:"
-    echo "$RECENT_FILES"
-    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$RECENT_FILES")
-  else
-    echo "OK: No recently modified files found."
+else
+  # Remote mode: check homepage last-modified header as a proxy
+  if [ "$DO_RECENT" -eq 1 ]; then
+    echo -e "\n[+] Remote check: fetching headers for $SITE_URL to detect recent modification..."
+    if command -v curl >/dev/null 2>&1; then
+      LM=$(curl -sS -I -L "$SITE_URL" 2>/dev/null | awk -F': ' '/Last-Modified:/ {print $2}' | head -1)
+      if [ -n "$LM" ]; then
+        echo " -> Last-Modified: $LM"
+      else
+        echo " -> Could not detect Last-Modified header for $SITE_URL"
+      fi
+    else
+      echo " -> curl not available; skipping remote recent-files check."
+    fi
   fi
 fi
 
@@ -631,7 +675,7 @@ fi
 
 
 # --- Access logs scan (home directory access-logs + compressed logs) ---
-if [ "$DO_ACCESS_LOGS" -eq 1 ]; then
+if [ "$DO_ACCESS_LOGS" -eq 1 ] && [ "$REMOTE_MODE" -eq 0 ]; then
   echo -e "\n[+] Scanning access logs under /home/* (access-logs + logs) for suspicious requests..."
 
   ACCESS_LOG_FINDINGS=""
@@ -816,7 +860,7 @@ fi
 
 
 # --- ModSecurity logs scan (audit/debug logs) ---
-if [ "$DO_MODSEC_LOGS" -eq 1 ]; then
+if [ "$DO_MODSEC_LOGS" -eq 1 ] && [ "$REMOTE_MODE" -eq 0 ]; then
   echo -e "\n[+] Scanning ModSecurity logs (audit/debug) for blocked/suspicious requests..."
 
   MODSEC_LOG_FINDINGS=""
@@ -897,8 +941,71 @@ fi
 
 
 # --- 3. Search for Malicious Code Patterns ---
-if [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_PHPSHELL" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ]; then
-  echo -e "\n[+] Searching for malicious code patterns in PHP files..."
+if [ "$REMOTE_MODE" -eq 0 ]; then
+  if [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_PHPSHELL" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ]; then
+    echo -e "\n[+] Searching for malicious code patterns in PHP files..."
+  fi
+else
+  # Remote light-weight checks for suspicious endpoints and meta-generator
+  echo -e "\n[+] Remote HTTP checks: probing common WordPress endpoints and metadata..."
+  REMOTE_FINDINGS=""
+  # Helper: perform HEAD and return status code
+  http_status() {
+    local url="$1"
+    if command -v curl >/dev/null 2>&1; then
+      curl -sSL -o /dev/null -w "%{http_code}" -I "$url" 2>/dev/null || echo "000"
+    else
+      echo "000"
+    fi
+  }
+  # Helper: fetch content to temp and print path
+  http_fetch() {
+    local url="$1"
+    if ! command -v curl >/dev/null 2>&1; then
+      return 1
+    fi
+    tmpf=$(mktemp -t wp-scan-remote-XXXXXX.html)
+    if curl -fsSL "$url" -o "$tmpf"; then
+      echo "$tmpf"
+      return 0
+    else
+      rm -f "$tmpf"
+      return 1
+    fi
+  }
+
+  # Check common files
+  for name in "wp-login.php" "xmlrpc.php" "wp-admin/" "wp-includes/" "robots.txt" ".well-known"; do
+    url="$SITE_URL/$name"
+    st=$(http_status "$url")
+    if [ "$st" != "000" ] && [ "$st" -ge 200 ] && [ "$st" -lt 400 ]; then
+      REMOTE_FINDINGS=$(printf "%s\n%s\n" "$REMOTE_FINDINGS" "$url (status $st)")
+    fi
+  done
+
+  # Check homepage meta generator for WP version
+  H_TMP=$(http_fetch "$SITE_URL" 2>/dev/null || true)
+  if [ -n "$H_TMP" ] && [ -f "$H_TMP" ]; then
+    gen=$(grep -i -m1 "<meta[^>]*name=\"generator\"[^>]*>" -i -I -n "$H_TMP" 2>/dev/null || true)
+    if [ -n "$gen" ]; then
+      ver=$(sed -n -E 's/.*content=["'"']WordPress[[:space:]]*([0-9.]+)["'"'].*>/\1/pI' <<<"$gen" || true)
+      if [ -n "$ver" ]; then
+        REMOTE_FINDINGS=$(printf "%s\n%s\n" "$REMOTE_FINDINGS" "Detected WordPress version (meta): $ver")
+      else
+        # Try to extract generator content raw
+        genraw=$(sed -n -E "s/.*content=[\\\"'\\\"][^\\\"]*[\\\"'\\\"].*/&/pI" "$H_TMP" 2>/dev/null || true)
+        REMOTE_FINDINGS=$(printf "%s\n%s\n" "$REMOTE_FINDINGS" "Generator tag present: $genraw")
+      fi
+    fi
+  fi
+  [ -n "$H_TMP" ] && rm -f "$H_TMP"
+
+  if [ -n "$REMOTE_FINDINGS" ]; then
+    echo "!!! WARNING: Remote checks found potential indicators:" 
+    echo "$REMOTE_FINDINGS"
+  else
+    echo "OK: No obvious remote indicators discovered (lightweight checks)."
+  fi
 fi
 
 # Search for common backdoor functions
