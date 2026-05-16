@@ -228,3 +228,9 @@ bash wp-scan.sh --zip /var/www/html/scan-flags.zip /var/www/html/site
 ## License
 
 GPLv3 (see `LICENSE`).
+
+## Docker
+A Dockerfile has been added to allow running wp-scan in a lightweight container.
+Build: docker build -t wp-scan .
+Run:  docker run --rm wp-scan --help
+
