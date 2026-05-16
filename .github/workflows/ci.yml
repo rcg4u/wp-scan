@@ -22,3 +22,43 @@ jobs:
         run: docker build -t wp-scan:ci .
       - name: Run help
         run: docker run --rm wp-scan:ci --help || true
+
+  sarif-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq zip
+      - name: Prepare sample site and signatures
+        run: |
+          mkdir -p sample-site
+          # simple PHP files; one matches the example signature
+          echo "<?php echo 'hello';" > sample-site/index.php
+          echo "<?php eval(\$a); ?>" > sample-site/suspicious.php
+          # Ensure signatures/latest-signatures.txt exists for scan
+          mkdir -p signatures
+          cp signatures/example-signatures.txt signatures/latest-signatures.txt || true
+      - name: Run wp-scan (dry-run) and emit SARIF/CSV
+        run: |
+          bash wp-scan.sh --no-wordpress --dry-run --sarif sarif-output.sarif --csv csv-output.csv sample-site || true
+      - name: Validate SARIF
+        run: |
+          if [ -f sarif-output.sarif ]; then
+            jq empty sarif-output.sarif
+            echo "SARIF valid"
+          else
+            echo "SARIF not produced"; exit 1
+          fi
+      - name: Validate CSV
+        run: |
+          if [ -f csv-output.csv ]; then
+            echo "CSV produced:"
+            head -n 20 csv-output.csv
+          else
+            echo "CSV not produced"; exit 1
+          fi
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarif
+          path: sarif-output.sarif
