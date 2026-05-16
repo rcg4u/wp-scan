@@ -234,3 +234,5 @@ A Dockerfile has been added to allow running wp-scan in a lightweight container.
 Build: docker build -t wp-scan .
 Run:  docker run --rm wp-scan --help
 
+## CI
+A GitHub Actions workflow (./github/workflows/ci.yml) has been added to run ShellCheck and basic checks on push and pull requests.

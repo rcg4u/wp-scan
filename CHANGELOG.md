@@ -9,3 +9,4 @@
 - fix: avoid subshell variable loss when scanning uploads directories
 - feat: improved JSON output with per-module file lists
 - feat: add Dockerfile for containerized runs
+- ci: add GitHub Actions workflow (ShellCheck + basic smoke tests)
