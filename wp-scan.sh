@@ -71,6 +71,19 @@ check_dependencies() {
 }
 check_dependencies || true
 
+# Prefer the modular implementation when available. This sources the
+# modular entrypoint which wires lib/core.sh, lib/menu.sh, lib/dispatcher.sh
+# and all modules under modules/*.sh and then calls main(). Sourcing
+# wp-scan-mod.sh keeps this file backward-compatible while consolidating
+# helper implementations into lib/.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/wp-scan-mod.sh" ]; then
+  # shellcheck source=wp-scan-mod.sh
+  . "$SCRIPT_DIR/wp-scan-mod.sh"
+  exit $?
+fi
+
+
 
 # --- Argument Parsing (email support) ---
 # Allow configuration through CLI flags or environment variables

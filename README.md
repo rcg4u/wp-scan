@@ -52,6 +52,8 @@ If no arguments are provided, usage is shown.
 
 Note: This script now enables strict mode (set -euo pipefail) and includes additional runtime checks. Some optional features require external tools (jq, zip, gzip, wp, lsattr); the script will warn if they're unavailable and skip related checks.
 
+The top-level wp-scan.sh now delegates to a modular implementation (wp-scan-mod.sh + lib/) to consolidate helper functions and make the codebase easier to extend and test.
+
 New features added:
 - More robust uploads directory scanning (avoids subshell variable scoping issues)
 - Improved JSON output with per-module file lists
