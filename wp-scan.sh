@@ -469,7 +469,13 @@ if [ "$MENU_MODE" -eq 1 ]; then
   echo "16) Potential one-liner shells                    (--oneliner)"
   echo "17) WP-CLI deep checks                            (--wp-cli)"
   echo "18) Immutable files (+i attribute)                (--immutable)"
-  echo "Select modules to run (e.g., 1,3,8) or press Enter for default (all):"
+  echo "19) Dry-run (do not create archives or modify files) (--dry-run)"
+  echo "20) JSON output (compact summary)                 (--json)"
+  echo "21) Emit SARIF to ./sarif-output.sarif            (--sarif <file>)"
+  echo "22) Emit CSV to ./csv-output.csv                  (--csv <file>)"
+  echo "23) Update signatures (download latest feed)     (--update-signatures)"
+  echo "24) Increase verbosity                             (-v/--verbose)"
+  echo "Select modules/options to run (e.g., 1,3,8,21) or press Enter for default (all):"
   read -r USER_SEL
   if [ -n "$USER_SEL" ]; then
     enable_only_defaults
@@ -493,6 +499,12 @@ if [ "$MENU_MODE" -eq 1 ]; then
         16) DO_ONELINER=1 ;;
         17) DO_WP_CLI=1 ;;
         18) DO_IMMUTABLE=1 ;;
+        19) DRY_RUN=1 ;;
+        20) JSON_OUTPUT=1 ;;
+        21) SARIF_FILE="sarif-output.sarif" ;;
+        22) CSV_FILE="csv-output.csv" ;;
+        23) DO_UPDATE_SIGNATURES=1 ;;
+        24) VERBOSITY=$((VERBOSITY+1)) ;;
       esac
     done
   fi
