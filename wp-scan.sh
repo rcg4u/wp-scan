@@ -46,6 +46,31 @@
 # ====================================================================
 
 # --- Script Logic ---
+# Strict mode and error handling
+set -euo pipefail
+IFS=$'\n\t'
+error_handler() {
+  local lineno="$1"
+  local code="${2:-1}"
+  echo "[ERROR] Script failed at line $lineno with exit code $code" >&2
+  echo "See $LOG_FILE for details (if available)." >&2
+  exit "$code"
+}
+trap 'error_handler ${LINENO} $?' ERR
+
+# Check for commonly required commands and warn (do not abort; features may be skipped)
+check_dependencies() {
+  local missing=0
+  for cmd in grep sed awk find zip gzip jq wp lsattr; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      echo "[WARN] Required command '$cmd' not found; related checks may be skipped."
+      missing=1
+    fi
+  done
+  return $missing
+}
+check_dependencies || true
+
 
 # --- Argument Parsing (email support) ---
 # Allow configuration through CLI flags or environment variables
@@ -879,7 +904,7 @@ if [ "$DO_PHPSHELL" -eq 1 ]; then
   PHPSHELL_SIG_PATTERN="C99Shell|\\bc99\\b|R57|\\br57\\b|WSO|B374K|FilesMan|IndoXploit|WebShell|FilesManager|File\\s*manager|Upload\\s*file|Download\\s*file|Symlink|php_uname|posix_geteuid|posix_getpwuid|\\bwhoami\\b|\\buname\\b|\\bid\\b|\\bpriv8\\b|cmd\\s*="
   PHPSHELL_MATCH=$(grep -R -l -I --include="*.php" -E "$PHPSHELL_SIG_PATTERN" "$SITE_PATH" 2>/dev/null)
   # Also check common shell filenames
-  PHPSHELL_NAMES=$(find "$SITE_PATH" -type f $$ -iname "*wso*.php" -o -iname "*c99*.php" -o -iname "*r57*.php" -o -iname "*b374k*.php" -o -iname "*filesman*.php" -o -iname "webshell.php" -o -iname "shell.php" $$ 2>/dev/null)
+  PHPSHELL_NAMES=$(find "$SITE_PATH" -type f \( -iname "*wso*.php" -o -iname "*c99*.php" -o -iname "*r57*.php" -o -iname "*b374k*.php" -o -iname "*filesman*.php" -o -iname "webshell.php" -o -iname "shell.php" \) -print 2>/dev/null)
   if [ -n "$PHPSHELL_MATCH" ] || [ -n "$PHPSHELL_NAMES" ]; then
     echo "!!! WARNING: Potential PHP shell indicators found. Review these files:"
     # FIX: Use command substitution to properly capture the filtered list
@@ -1176,7 +1201,7 @@ if [ "$DO_IMMUTABLE" -eq 1 ]; then
   else
     # Use find to execute lsattr on all files and grep to filter for the immutable flag.
     # We only care about regular files, not directories.
-    IMMUTABLE_FILES=$(find "$SITE_PATH" -type f -exec lsattr -d {} \; 2>/dev/null | grep '^^.i' | awk '{print $2}')
+    IMMUTABLE_FILES=$(find "$SITE_PATH" -type f -exec lsattr -d {} \; 2>/dev/null | awk '$1 ~ /i/ {print $2}')
     if [ -n "$IMMUTABLE_FILES" ]; then
       echo "!!! WARNING: Found immutable files. This is highly suspicious and may indicate a rootkit or backdoor."
       echo "$IMMUTABLE_FILES"
@@ -1392,7 +1417,7 @@ fi
 # --- JSON Summary Output (optional) ---
 if [ "$JSON_OUTPUT" -eq 1 ]; then
   # derive counts based on variables populated above (fallback to grepping the log)
-  count_lines() { echo "$1" | sed '/^^\s*$/d' | wc -l | awk '{print $1}'; }
+  count_lines() { echo "$1" | sed '/^\s*$/d' | wc -l | awk '{print $1}'; }
   WARN_COUNT=$(grep -c "!!! WARNING" "$LOG_FILE" 2>/dev/null || true)
   WARN_COUNT=${WARN_COUNT:-0}
   STATUS="OK"; [ "$WARN_COUNT" -gt 0 ] && STATUS="WARNINGS"
@@ -1450,7 +1475,7 @@ if [ "$ZIP_ENABLED" -eq 1 ]; then
     echo "Creating zip archive of flagged files: $ZIP_TARGET_ZIP"
     FILE_LIST=$(mktemp -t wp-scan-ziplist-XXXXXX.txt)
     # Collect only existing files, unique (absolute paths)
-    printf "%s\n" "$ZIP_CANDIDATES" | sed '/^^\s*$/d' | while IFS= read -r p; do
+    printf "%s\n" "$ZIP_CANDIDATES" | sed '/^\s*$/d' | while IFS= read -r p; do
       [ -f "$p" ] && echo "$p"
     done | sort -u > "$FILE_LIST"
     COUNT=$(wc -l < "$FILE_LIST" | awk '{print $1}')

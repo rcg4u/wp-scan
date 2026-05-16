@@ -50,6 +50,8 @@ bash wp-scan.sh [options] /path/to/site/root
 
 If no arguments are provided, usage is shown.
 
+Note: This script now enables strict mode (set -euo pipefail) and includes additional runtime checks. Some optional features require external tools (jq, zip, gzip, wp, lsattr); the script will warn if they're unavailable and skip related checks.
+
 ### Options
 
 - `--email <addr>`: send report to this address if warnings were found
