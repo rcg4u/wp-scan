@@ -14,6 +14,7 @@ run_modules() {
     scan_wp_version
     scan_permissions
     scan_immutable
+    scan_image_headers
     scan_wp_cli
 }
 
@@ -35,6 +36,7 @@ run_selected_modules() {
     [ "$DO_WPVER" -eq 1 ] && scan_wp_version
     [ "$DO_PERMS" -eq 1 ] && scan_permissions
     [ "$DO_IMMUTABLE" -eq 1 ] && scan_immutable
+    [ "$DO_IMAGE_HEADERS" -eq 1 ] && scan_image_headers
     [ "$DO_WP_CLI" -eq 1 ] && scan_wp_cli
 }
 

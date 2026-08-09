@@ -10,6 +10,7 @@
 #   --email-from <addr>     Sender address (sendmail/msmtp)
 #   --email-subject <text>  Base subject; status appended
 #   --menu                  Interactive menu to select scan modules
+#   --plugin-scan            Scan wp-content/plugins for suspicious/malicious/fake plugins
 #   --only <modules>        Run only these modules (csv or space-separated)
 #   --skip <modules>        Skip these modules (csv or space-separated)
 #   --no-wordpress          Scan generic site; skip WordPress-specific checks
@@ -39,51 +40,14 @@
 #   --dyn-exec / --no-dyn-exec
 #   --oneliner / --no-oneliner
 #   --wp-cli / --no-wp-cli
+#   --image-headers / --no-image-headers
 #   --help                  Show usage
 #
-# Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, hidden, superglobal, curl, wpver, perms, verification, access-logs, modsec-logs, dyn-exec, oneliner, wp-cli, immutable, all
+# Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, hidden, superglobal, curl, wpver, perms, verification, access-logs, modsec-logs, dyn-exec, oneliner, wp-cli, plugin-scan, immutable, image-headers, all
 # Example: ./wp-scan.sh --only recent,uploads --email admin@example.com /var/www/html/site
 # ====================================================================
 
 # --- Script Logic ---
-# Strict mode and error handling
-set -euo pipefail
-IFS=$'\n\t'
-error_handler() {
-  local lineno="$1"
-  local code="${2:-1}"
-  echo "[ERROR] Script failed at line $lineno with exit code $code" >&2
-  echo "See $LOG_FILE for details (if available)." >&2
-  exit "$code"
-}
-trap 'error_handler ${LINENO} $?' ERR
-
-# Check for commonly required commands and warn (do not abort; features may be skipped)
-check_dependencies() {
-  local missing=0
-  for cmd in grep sed awk find zip gzip jq wp lsattr; do
-    if ! command -v "$cmd" >/dev/null 2>&1; then
-      echo "[WARN] Required command '$cmd' not found; related checks may be skipped."
-      missing=1
-    fi
-  done
-  return $missing
-}
-check_dependencies || true
-
-# Prefer the modular implementation when available. This sources the
-# modular entrypoint which wires lib/core.sh, lib/menu.sh, lib/dispatcher.sh
-# and all modules under modules/*.sh and then calls main(). Sourcing
-# wp-scan-mod.sh keeps this file backward-compatible while consolidating
-# helper implementations into lib/.
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$SCRIPT_DIR/wp-scan-mod.sh" ]; then
-  # shellcheck source=wp-scan-mod.sh
-  . "$SCRIPT_DIR/wp-scan-mod.sh"
-  exit $?
-fi
-
-
 
 # --- Argument Parsing (email support) ---
 # Allow configuration through CLI flags or environment variables
@@ -92,32 +56,7 @@ EMAIL_TO="${WP_SCAN_EMAIL_TO:-}"
 EMAIL_FROM="${WP_SCAN_EMAIL_FROM:-}"
 EMAIL_SUBJECT="${WP_SCAN_EMAIL_SUBJECT:-}"
 EMAIL_ALWAYS="${WP_SCAN_EMAIL_ALWAYS:-0}"
-# Remote scan / run mode
-REMOTE_MODE=0
-SITE_URL=""
-DRY_RUN=0
-VERBOSITY=1
-# Output formats
-SARIF_FILE=""
-CSV_FILE=""
-# Internal signature file path (default)
-SIGNATURES_FILE="${SIGNATURES_DIR:-$SCRIPT_DIR/signatures}/latest-signatures.txt"
-
 ARG_SITE=""
-
-# Optional allowlist for known-good site verification files.
-# Env var: WP_SCAN_VERIFICATION_ALLOWLIST
-# Example: WP_SCAN_VERIFICATION_ALLOWLIST="googlefdc65b73a3888f99.html,bing12345.html"
-VERIFICATION_ALLOWLIST="${WP_SCAN_VERIFICATION_ALLOWLIST:-}"
-
-# Signature feed (rules) support
-# Default URL can be overridden via --signatures-url or env var WP_SCAN_SIGNATURES_URL
-SIGNATURES_URL="${WP_SCAN_SIGNATURES_URL:-https://example.com/wp-scan-signatures/latest-signatures.txt}"
-# Local directory to store downloaded signatures (relative to script dir)
-SIGNATURES_DIR="${WP_SCAN_SIGNATURES_DIR:-$SCRIPT_DIR/signatures}"
-# When set, perform a signatures update and exit
-DO_UPDATE_SIGNATURES=0
-
 
 # Optional: file containing IPs to exclude from scan *results* (one per line).
 # Env var: WP_SCAN_EXCLUDED_IPS_FILE
@@ -136,6 +75,9 @@ ZIP_ENABLED=0
 ZIP_TARGET_ZIP=""
 ZIP_CANDIDATES=""
 SCAN_ALL=0
+
+# Suspicious IPs collection
+SUSPICIOUS_IPS=""
 
 # Module toggles (default: run all)
 DO_RECENT=1
@@ -157,6 +99,15 @@ DO_MODSEC_LOGS=1
 DO_DYN_EXEC=1
 DO_ONELINER=1
 DO_WP_CLI=1
+DO_IMAGE_HEADERS=1
+DO_PLUGIN_SCAN=1
+DO_SEO_SPAM=0
+DO_SEO_SPAM_MASS=0
+DO_SHADOW_ADMIN=0
+
+# Optional WP core verification/restore actions
+DO_VERIFY_CORE=0
+DO_RESTORE_CORE=0
 MENU_MODE=0
 
 # If the user passes one or more *enable* module triggers (e.g. --modsec-logs),
@@ -164,7 +115,7 @@ MENU_MODE=0
 DEFAULTS_CLEARED=0
 
 enable_only_defaults() {
-  DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_ACCESS_LOGS=0; DO_MODSEC_LOGS=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0
+  DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_ACCESS_LOGS=0; DO_MODSEC_LOGS=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0; DO_IMAGE_HEADERS=0; DO_PLUGIN_SCAN=0
   DEFAULTS_CLEARED=1
 }
 
@@ -181,6 +132,9 @@ set_module_flag() {
     recent) DO_RECENT=1 ;;
     suspicious) DO_SUSPICIOUS=1 ;;
     uploads) DO_UPLOADS=1 ;;
+	    seo-spam) DO_SEO_SPAM=1 ;;
+    shadow-admin) DO_SHADOW_ADMIN=1 ;;
+
     backdoor) DO_BACKDOOR=1 ;;
     obfuscation) DO_OBFUSCATED=1 ;;
     curl) DO_CURL=1 ;;
@@ -193,8 +147,9 @@ set_module_flag() {
     dyn-exec) DO_DYN_EXEC=1 ;;
     oneliner) DO_ONELINER=1 ;;
     wp-cli) DO_WP_CLI=1 ;;
+    image-headers) DO_IMAGE_HEADERS=1 ;;
     all)
-      DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_UPLOADS_PHP=1; DO_BACKDOOR=1; DO_OBFUSCATED=1; DO_PHPSHELL=1; DO_HIDDEN=1; DO_SUPERGLOBAL=1; DO_CURL=1; DO_WPVER=1; DO_PERMS=1; DO_IMMUTABLE=1; DO_VERIFICATION=1; DO_ACCESS_LOGS=1; DO_MODSEC_LOGS=1; DO_DYN_EXEC=1; DO_ONELINER=1; DO_WP_CLI=1
+      DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_UPLOADS_PHP=1; DO_BACKDOOR=1; DO_OBFUSCATED=1; DO_PHPSHELL=1; DO_HIDDEN=1; DO_SUPERGLOBAL=1; DO_CURL=1; DO_WPVER=1; DO_PERMS=1; DO_IMMUTABLE=1; DO_VERIFICATION=1; DO_ACCESS_LOGS=1; DO_MODSEC_LOGS=1; DO_DYN_EXEC=1; DO_ONELINER=1; DO_WP_CLI=1; DO_IMAGE_HEADERS=1
       ;;
   esac
 }
@@ -216,8 +171,10 @@ clear_module_flag() {
     dyn-exec) DO_DYN_EXEC=0 ;;
     oneliner) DO_ONELINER=0 ;;
     wp-cli) DO_WP_CLI=0 ;;
+    image-headers) DO_IMAGE_HEADERS=0 ;;
+    plugin-scan) DO_PLUGIN_SCAN=0 ;;
     all)
-      DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_ACCESS_LOGS=0; DO_MODSEC_LOGS=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0
+      DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_ACCESS_LOGS=0; DO_MODSEC_LOGS=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0; DO_IMAGE_HEADERS=0; DO_PLUGIN_SCAN=0
       ;;
   esac
 }
@@ -252,15 +209,7 @@ while [ $# -gt 0 ]; do
     --exclude-ips-file) EXCLUDED_IPS_FILE="$2"; shift 2 ;;
     --with-cache) EXCLUDE_CACHE=0; shift ;;
     --scan-all) SCAN_ALL=1; set_module_flag all; shift ;;
-    --update-signatures) DO_UPDATE_SIGNATURES=1; shift ;;
-    --signatures-url) SIGNATURES_URL="$2"; shift 2 ;;
-    --signatures-dir) SIGNATURES_DIR="$2"; shift 2 ;;
     --recent) enter_only_mode_if_needed; set_module_flag recent; shift ;;
-    --url) SITE_URL="$2"; REMOTE_MODE=1; shift 2 ;;
-    --dry-run) DRY_RUN=1; shift ;;
-    -v|--verbose) VERBOSITY=$((VERBOSITY+1)); shift ;;
-    --sarif) SARIF_FILE="$2"; shift 2 ;;
-    --csv) CSV_FILE="$2"; shift 2 ;;
     --no-recent) clear_module_flag recent; shift ;;
     --suspicious) enter_only_mode_if_needed; set_module_flag suspicious; shift ;;
     --no-suspicious) clear_module_flag suspicious; shift ;;
@@ -298,12 +247,20 @@ while [ $# -gt 0 ]; do
     --no-oneliner) clear_module_flag oneliner; shift ;;
     --wp-cli) enter_only_mode_if_needed; set_module_flag wp-cli; shift ;;
     --no-wp-cli) clear_module_flag wp-cli; shift ;;
+    --plugin-scan) enter_only_mode_if_needed; set_module_flag plugin-scan; shift ;;
+    --no-plugin-scan) clear_module_flag plugin-scan; shift ;;
+    --image-headers) enter_only_mode_if_needed; set_module_flag image-headers; shift ;;
+    --no-image-headers) clear_module_flag image-headers; shift ;;
+    --verify-core) DO_VERIFY_CORE=1; shift ;;
+    --restore-core) DO_RESTORE_CORE=1; shift ;;
+    --seo-spam-mass) DO_SEO_SPAM_MASS=1; shift ;;
+	
     -h|--help)
       echo "Usage: $0 [options] /path/to/site/root"
       echo
-      echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --only <modules> --skip <modules> --no-wordpress --sc --json --exit-code <binary|count> --zip <filename.zip> --exclude-ips-file <file> --with-cache --scan-all"
-      echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --uploads-php/--no-uploads-php --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --hidden/--no-hidden --superglobal/--no-superglobal --curl/--no-curl --wpver/--no-wpver --perms/--no-perms --immutable/--no-immutable --verification/--no-verification --access-logs/--no-access-logs --modsec-logs/--no-modsec-logs --dyn-exec/--no-dyn-exec --oneliner/--no-oneliner --wp-cli/--no-wp-cli"
-      echo "Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, dyn-exec, oneliner, wp-cli, hidden, superglobal, curl, wpver, perms, immutable, verification, access-logs, modsec-logs, all"
+      echo "Options: --email <addr> --email-always --email-from <addr> --email-subject <text> --menu --plugin-scan --only <modules> --skip <modules> --no-wordpress --sc --json --exit-code <binary|count> --zip <filename.zip> --exclude-ips-file <file> --with-cache --scan-all --verify-core --restore-core"
+      echo "Module Triggers: --recent/--no-recent --suspicious/--no-suspicious --uploads/--no-uploads --uploads-php/--no-uploads-php --backdoor/--no-backdoor --obfuscation/--no-obfuscation --phpshell/--no-phpshell --hidden/--no-hidden --superglobal/--no-superglobal --curl/--no-curl --wpver/--no-wpver --perms/--no-perms --immutable/--no-immutable --verification/--no-verification --access-logs/--no-access-logs --modsec-logs/--no-modsec-logs --dyn-exec/--no-dyn-exec --oneliner/--no-oneliner --wp-cli/--no-wp-cli --image-headers/--no-image-headers"
+      echo "Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, dyn-exec, oneliner, wp-cli, hidden, superglobal, curl, wpver, perms, immutable, verification, access-logs, modsec-logs, image-headers, all"
       echo
       echo "Examples:"
       echo " $0 --only recent,uploads --email admin@example.com /var/www/html/site"
@@ -322,52 +279,34 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ -z "$ARG_SITE" ] && [ "$REMOTE_MODE" -eq 0 ]; then
-  # No arguments provided and not in remote mode: show help and exit
+if [ -z "$ARG_SITE" ]; then
+  # No arguments provided: show help and exit
   echo "Usage: $0 [options] /path/to/site/root"
   echo "Run with --help to see all options."
   exit 0
 fi
 
-# If remote mode is enabled, validate URL; otherwise sanitize local path
-if [ "$REMOTE_MODE" -eq 1 ]; then
-  if [ -n "$ARG_SITE" ]; then
-    echo "[WARN] Both local path and --url provided. Remote mode takes precedence."
-  fi
-  # Basic URL normalization (remove trailing slash)
-  SITE_URL="${SITE_URL%/}"
-  if [ -z "$SITE_URL" ]; then
-    echo "Error: --url requires a non-empty URL."
+# Assign the site argument to a variable and sanitize it.
+SITE_PATH=$(realpath "$ARG_SITE")
+
+# Check if the provided path actually exists and is a directory.
+if [ ! -d "$SITE_PATH" ]; then
+  echo "Error: Directory '$SITE_PATH' not found."
+  exit 1
+fi
+
+# Check if it looks like a WordPress installation.
+if [ "$WP_MODE" -eq 1 ]; then
+  if [ ! -f "$SITE_PATH/wp-config.php" ]; then
+    echo "Error: wp-config.php not found in '$SITE_PATH'. Is this a WordPress root?"
     exit 1
   fi
-  echo "Running in remote HTTP scan mode for: $SITE_URL"
 else
-  # Assign the site argument to a variable and sanitize it.
-  SITE_PATH=$(realpath "$ARG_SITE")
-
-  # Check if the provided path actually exists and is a directory.
-  if [ ! -d "$SITE_PATH" ]; then
-    echo "Error: Directory '$SITE_PATH' not found."
-    exit 1
-  fi
-
-  # Check if it looks like a WordPress installation.
-  if [ "$WP_MODE" -eq 1 ]; then
-    if [ ! -f "$SITE_PATH/wp-config.php" ]; then
-      echo "Error: wp-config.php not found in '$SITE_PATH'. Is this a WordPress root?"
-      exit 1
-    fi
-  else
-    echo "[Info] Non-WordPress mode: skipping wp-config.php check."
-  fi
+  echo "[Info] Non-WordPress mode: skipping wp-config.php check."
 fi
 
 echo "=========================================================================="
-if [ "$REMOTE_MODE" -eq 1 ]; then
-  echo "Starting Generic WordPress HTTP Security Scan for: $SITE_URL"
-else
-  echo "Starting Generic WordPress Security Scan for: $SITE_PATH"
-fi
+echo "Starting Generic WordPress Security Scan for: $SITE_PATH"
 echo "=========================================================================="
 
 
@@ -423,53 +362,7 @@ filter_excluded_ips() {
 }
 
 prepare_excluded_ip_patterns
-
-# --- Signature update helper ---
-update_signatures() {
-  mkdir -p "$SIGNATURES_DIR" 2>/dev/null || true
-  echo "[+] Updating signatures from: $SIGNATURES_URL"
-  # Prefer curl, fallback to wget
-  if command -v curl >/dev/null 2>&1; then
-    if ! curl -fsSL "$SIGNATURES_URL" -o "$SIGNATURES_DIR/latest-signatures.txt"; then
-      echo "[WARN] Failed to download signatures with curl from $SIGNATURES_URL"
-      return 1
-    fi
-  elif command -v wget >/dev/null 2>&1; then
-    if ! wget -qO "$SIGNATURES_DIR/latest-signatures.txt" "$SIGNATURES_URL"; then
-      echo "[WARN] Failed to download signatures with wget from $SIGNATURES_URL"
-      return 1
-    fi
-  else
-    echo "[WARN] No HTTP download tool (curl/wget) available; cannot update signatures."
-    return 1
-  fi
-
-  # Validate downloaded signatures (best-effort). If a validator is present, use it.
-  VALIDATOR="${SCRIPT_DIR:-.}/validate-signatures.sh"
-  if [ -x "$VALIDATOR" ] || command -v bash >/dev/null 2>&1; then
-    if ! bash "$VALIDATOR" "$SIGNATURES_DIR/latest-signatures.txt"; then
-      echo "[WARN] Signature validation failed; removing downloaded file."
-      rm -f "$SIGNATURES_DIR/latest-signatures.txt" 2>/dev/null || true
-      return 2
-    fi
-  fi
-
-  echo "[+] Signatures saved to: $SIGNATURES_DIR/latest-signatures.txt"
-  return 0
-}
-
 trap cleanup_excluded_ip_patterns EXIT
-
-# If requested, update signatures and exit early
-if [ "$DO_UPDATE_SIGNATURES" -eq 1 ]; then
-  if update_signatures; then
-    echo "Signatures updated successfully."
-    exit 0
-  else
-    echo "Signature update failed."
-    exit 2
-  fi
-fi
 
 
 # Optional interactive module selection
@@ -491,15 +384,15 @@ if [ "$MENU_MODE" -eq 1 ]; then
   echo "14) ModSecurity logs scan (/var/log/*modsec*)     (--modsec-logs)"
   echo "15) Dynamic execution patterns                    (--dyn-exec)"
   echo "16) Potential one-liner shells                    (--oneliner)"
+    echo "20) SEO Spam 'Link Factory' (German Hijack)       (--seo-spam)"
+  echo "21) Database Shadow Admin Audit                  (--shadow-admin)"
+  echo "22) Plugin deep scan (plugins directory)          (--plugin-scan)"
+  echo "40) Mass-scan /home/* for SEO Spam (de_DE.l10n.php)  (--seo-spam-mass)"
+
   echo "17) WP-CLI deep checks                            (--wp-cli)"
   echo "18) Immutable files (+i attribute)                (--immutable)"
-  echo "19) Dry-run (do not create archives or modify files) (--dry-run)"
-  echo "20) JSON output (compact summary)                 (--json)"
-  echo "21) Emit SARIF to ./sarif-output.sarif            (--sarif <file>)"
-  echo "22) Emit CSV to ./csv-output.csv                  (--csv <file>)"
-  echo "23) Update signatures (download latest feed)     (--update-signatures)"
-  echo "24) Increase verbosity                             (-v/--verbose)"
-  echo "Select modules/options to run (e.g., 1,3,8,21) or press Enter for default (all):"
+  echo "19) Image header malware scan                     (--image-headers)"
+  echo "Select modules to run (e.g., 1,3,8) or press Enter for default (all):"
   read -r USER_SEL
   if [ -n "$USER_SEL" ]; then
     enable_only_defaults
@@ -513,6 +406,11 @@ if [ "$MENU_MODE" -eq 1 ]; then
         6) DO_CURL=1 ;;
         7) DO_WPVER=1 ;;
         8) DO_PERMS=1 ;;
+		        20) DO_SEO_SPAM=1 ;;
+        21) DO_SHADOW_ADMIN=1 ;;
+        22) DO_PLUGIN_SCAN=1 ;;
+        40) DO_SEO_SPAM_MASS=1 ;;
+
         9) DO_UPLOADS_PHP=1 ;;
         10) DO_HIDDEN=1 ;;
         11) DO_SUPERGLOBAL=1 ;;
@@ -523,12 +421,7 @@ if [ "$MENU_MODE" -eq 1 ]; then
         16) DO_ONELINER=1 ;;
         17) DO_WP_CLI=1 ;;
         18) DO_IMMUTABLE=1 ;;
-        19) DRY_RUN=1 ;;
-        20) JSON_OUTPUT=1 ;;
-        21) SARIF_FILE="sarif-output.sarif" ;;
-        22) CSV_FILE="csv-output.csv" ;;
-        23) DO_UPDATE_SIGNATURES=1 ;;
-        24) VERBOSITY=$((VERBOSITY+1)) ;;
+        19) DO_IMAGE_HEADERS=1 ;;
       esac
     done
   fi
@@ -561,37 +454,20 @@ if [ "$WP_MODE" -eq 0 ] && [ "$SCAN_ALL" -eq 0 ]; then
 fi
 
 
-# --- 1. Check for Recently Modified Files (local) or remote equivalents ---
-if [ "$REMOTE_MODE" -eq 0 ]; then
-  if [ "$DO_RECENT" -eq 1 ]; then
-    echo -e "\n[+] Checking for recently modified files (any type) in the last 60 minutes..."
-    if [ "$EXCLUDE_CACHE" -eq 1 ]; then
-      RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 -not -path "*/wp-content/cache/*" 2>/dev/null)
-    else
-      RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 2>/dev/null)
-    fi
-    if [ -n "$RECENT_FILES" ]; then
-      echo "!!! WARNING: Recently modified files found. Please review them:"
-      echo "$RECENT_FILES"
-      ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$RECENT_FILES")
-    else
-      echo "OK: No recently modified files found."
-    fi
+# --- 1. Check for Recently Modified Files ---
+if [ "$DO_RECENT" -eq 1 ]; then
+  echo -e "\n[+] Checking for recently modified files (any type) in the last 60 minutes..."
+  if [ "$EXCLUDE_CACHE" -eq 1 ]; then
+    RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 -not -path "*/wp-content/cache/*" 2>/dev/null)
+  else
+    RECENT_FILES=$(find "$SITE_PATH" -type f -mmin -60 2>/dev/null)
   fi
-else
-  # Remote mode: check homepage last-modified header as a proxy
-  if [ "$DO_RECENT" -eq 1 ]; then
-    echo -e "\n[+] Remote check: fetching headers for $SITE_URL to detect recent modification..."
-    if command -v curl >/dev/null 2>&1; then
-      LM=$(curl -sS -I -L "$SITE_URL" 2>/dev/null | awk -F': ' '/Last-Modified:/ {print $2}' | head -1)
-      if [ -n "$LM" ]; then
-        echo " -> Last-Modified: $LM"
-      else
-        echo " -> Could not detect Last-Modified header for $SITE_URL"
-      fi
-    else
-      echo " -> curl not available; skipping remote recent-files check."
-    fi
+  if [ -n "$RECENT_FILES" ]; then
+    echo "!!! WARNING: Recently modified files found. Please review them:"
+    echo "$RECENT_FILES"
+    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$RECENT_FILES")
+  else
+    echo "OK: No recently modified files found."
   fi
 fi
 
@@ -600,7 +476,7 @@ fi
 if [ "$DO_SUSPICIOUS" -eq 1 ]; then
   echo -e "\n[+] Checking for suspicious file/directory names..."
   # Common backdoor file/directory names
-  SUSPICIOUS_NAMES=("cg-bin" "phpshell" "c99" "r57" "webshell" "wso" "adminer.php" "phpmyadmin" "xmlrpc.php")
+  SUSPICIOUS_NAMES=("cg-bin" "phpshell" "c99" "r57" "webshell" "wso" "adminer.php" "phpmyadmin" "xmlrpc.php" "enmnnu.php")
   for name in "${SUSPICIOUS_NAMES[@]}"; do
     if [ -f "$SITE_PATH/$name" ] || [ -d "$SITE_PATH/$name" ]; then
       echo "!!! WARNING: Suspicious file/directory found: '/$name'"
@@ -615,23 +491,17 @@ fi
 if [ "$DO_UPLOADS" -eq 1 ]; then
   UPLOADS_DIR="$SITE_PATH/wp-content/uploads"
   if [ -d "$UPLOADS_DIR" ]; then
-    # Use a temporary file and avoid piping into a subshell so variables remain available.
+    # FIX: Use a while loop with process redirection to avoid subshell issues.
     echo " -> Checking for non-month directories in uploads..."
     FAKE_MONTH_DIRS=""
-    if command -v mktemp >/dev/null 2>&1; then
-      FAKE_MONTH_DIRS_FILE=$(mktemp -t wp-scan-fake-months-XXXXXX.txt)
-    else
-      FAKE_MONTH_DIRS_FILE="$SITE_PATH/wp-scan-fake-months.txt"
-      : > "$FAKE_MONTH_DIRS_FILE"
-    fi
-    while IFS= read -r DIR; do
+    find "$UPLOADS_DIR" -maxdepth 2 -type d -name "[0-9]*" -print 2>/dev/null | while IFS= read -r DIR; do
       BASENAME=$(basename "$DIR")
       # months are typically 01-12
       if [[ "$BASENAME" =~ ^[0-9]+$ ]] && ! [[ "$BASENAME" =~ ^(0[1-9]|1[0-2])$ ]]; then
-        printf "%s\n" "$DIR" >> "$FAKE_MONTH_DIRS_FILE"
+        echo "$DIR"
       fi
-    done < <(find "$UPLOADS_DIR" -maxdepth 2 -type d -name "[0-9]*" -print 2>/dev/null)
-    FAKE_MONTH_DIRS=$(cat "$FAKE_MONTH_DIRS_FILE" 2>/dev/null || true)
+    done | sort > "${FAKE_MONTH_DIRS_FILE:=$(mktemp)}"
+    FAKE_MONTH_DIRS=$(cat "${FAKE_MONTH_DIRS_FILE}")
 
     if [ -n "$FAKE_MONTH_DIRS" ]; then
       echo "!!! WARNING: Found non-month directories in uploads (possible backdoors):"
@@ -667,58 +537,19 @@ fi
 
 # Check for any verification files (Google, Bing, Yandex, etc.)
 if [ "$DO_VERIFICATION" -eq 1 ]; then
-  VERIFICATION_FILES_ALL=$( { find "$SITE_PATH" -maxdepth 1 -type f \( -name "google*.html" -o -name "bing*.html" -o -name "yandex*.html" \) 2>/dev/null ; find "$SITE_PATH/.well-known" -type f 2>/dev/null ; } 2>/dev/null )
-
-  # Split into allowlisted vs suspicious
-  VERIFICATION_FILES=""
-  VERIFICATION_FILES_ALLOWED=""
-  ALLOW_LIST=$(echo "$VERIFICATION_ALLOWLIST" | tr ',' ' ')
-  if [ -n "$VERIFICATION_FILES_ALL" ]; then
-    while IFS= read -r vf; do
-      [ -z "$vf" ] && continue
-      base=$(basename "$vf")
-      is_allowed=0
-      if [ -n "$ALLOW_LIST" ]; then
-        for a in $ALLOW_LIST; do
-          [ -z "$a" ] && continue
-          if [ "$base" = "$a" ]; then
-            is_allowed=1
-            break
-          fi
-        done
-      fi
-
-      if [ "$is_allowed" -eq 1 ]; then
-        VERIFICATION_FILES_ALLOWED=$(printf "%s\n%s" "$VERIFICATION_FILES_ALLOWED" "$vf")
-      else
-        VERIFICATION_FILES=$(printf "%s\n%s" "$VERIFICATION_FILES" "$vf")
-      fi
-    done < <(printf "%s\n" "$VERIFICATION_FILES_ALL" | sed '/^\s*$/d')
-  fi
-
-  # Print warnings only for non-allowlisted verification files
+  VERIFICATION_FILES=$( { find "$SITE_PATH" -maxdepth 1 -type f \( -name "google*.html" -o -name "bing*.html" -o -name "yandex*.html" \) 2>/dev/null ; find "$SITE_PATH/.well-known" -type f 2>/dev/null ; } 2>/dev/null )
   if [ -n "$VERIFICATION_FILES" ]; then
-    VERIFICATION_FILES=$(printf "%s\n" "$VERIFICATION_FILES" | sed '/^\s*$/d')
-    echo "!!! WARNING: Found verification files (not allowlisted). These could be for unauthorized ownership claims:"
+    echo "!!! WARNING: Found verification files. These could be for unauthorized ownership claims:"
     echo "$VERIFICATION_FILES"
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$VERIFICATION_FILES")
-  fi
-
-  # Print allowlisted verification files without a WARNING label
-  if [ -n "$VERIFICATION_FILES_ALLOWED" ]; then
-    VERIFICATION_FILES_ALLOWED=$(printf "%s\n" "$VERIFICATION_FILES_ALLOWED" | sed '/^\s*$/d')
-    echo "INFO: Allowlisted verification files found:"
-    echo "$VERIFICATION_FILES_ALLOWED"
-  fi
-
-  if [ -z "$VERIFICATION_FILES" ] && [ -z "$VERIFICATION_FILES_ALLOWED" ]; then
+  else
     echo "OK: No verification files found."
   fi
 fi
 
 
 # --- Access logs scan (home directory access-logs + compressed logs) ---
-if [ "$DO_ACCESS_LOGS" -eq 1 ] && [ "$REMOTE_MODE" -eq 0 ]; then
+if [ "$DO_ACCESS_LOGS" -eq 1 ]; then
   echo -e "\n[+] Scanning access logs under /home/* (access-logs + logs) for suspicious requests..."
 
   ACCESS_LOG_FINDINGS=""
@@ -752,6 +583,16 @@ if [ "$DO_ACCESS_LOGS" -eq 1 ] && [ "$REMOTE_MODE" -eq 0 ]; then
     esac
   }
 
+  # Extract IP address from log line and add to suspicious IPs collection
+  collect_suspicious_ip() {
+    local line="$1"
+    # Extract IP from common log formats (IP is typically first field)
+    local ip=$(printf "%s" "$line" | grep -oE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
+    if [ -n "$ip" ]; then
+      SUSPICIOUS_IPS=$(printf "%s\n%s" "$SUSPICIOUS_IPS" "$ip")
+    fi
+  }
+
   # If the scanned site is under /home/<user>/public_html, prefer that user's log folders.
   ACCESS_LOG_USER=""
   if [[ "$SITE_PATH" =~ ^/home/([^/]+)/public_html(/|$) ]]; then
@@ -775,6 +616,12 @@ if [ "$DO_ACCESS_LOGS" -eq 1 ] && [ "$REMOTE_MODE" -eq 0 ]; then
 
         # Capture matched lines for status parsing (strip the grep-added line number prefix)
         ACCESS_LOG_MATCHED_LINES=$(printf "%s\n%s\n" "$ACCESS_LOG_MATCHED_LINES" "$(printf "%s\n" "$hits" | sed -E 's/^[0-9]+://')")
+        
+        # Extract and collect suspicious IPs from matched lines
+        while IFS= read -r ln; do
+          [ -z "$ln" ] && continue
+          collect_suspicious_ip "$(printf "%s" "$ln" | sed -E 's/^[0-9]+://')"
+        done < <(printf "%s\n" "$hits")
       fi
     fi
   }
@@ -794,6 +641,12 @@ if [ "$DO_ACCESS_LOGS" -eq 1 ] && [ "$REMOTE_MODE" -eq 0 ]; then
 
       # Capture matched lines for status parsing (strip the grep-added line number prefix)
       ACCESS_LOG_MATCHED_LINES=$(printf "%s\n%s\n" "$ACCESS_LOG_MATCHED_LINES" "$(printf "%s\n" "$hits" | sed -E 's/^[0-9]+://')")
+      
+      # Extract and collect suspicious IPs from matched lines
+      while IFS= read -r ln; do
+        [ -z "$ln" ] && continue
+        collect_suspicious_ip "$(printf "%s" "$ln" | sed -E 's/^[0-9]+://')"
+      done < <(printf "%s\n" "$hits")
     fi
   }
 
@@ -836,6 +689,18 @@ if [ "$DO_ACCESS_LOGS" -eq 1 ] && [ "$REMOTE_MODE" -eq 0 ]; then
   fi
 
   ACCESS_LOG_FILES=$(printf "%s\n" "$ACCESS_LOG_FILES" | sed '/^\s*$/d' | sort -u)
+
+  # Also look for application error_log files inside the site and show the last 100 lines for quick debugging.
+  ERR_LOG_FILES=$(find "$SITE_PATH" -type f -name "error_log" 2>/dev/null | head -50)
+  if [ -n "$ERR_LOG_FILES" ]; then
+    echo " -> Found error_log files under site; showing last 100 lines for each (use --zip to collect):"
+    while IFS= read -r ef; do
+      [ -z "$ef" ] && continue
+      echo "----- $ef (last 100 lines) -----"
+      if tail -n 100 "$ef" 2>/dev/null; then :; else echo "(couldn't read or tail $ef)"; fi
+      ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$ef")
+    done < <(printf "%s\n" "$ERR_LOG_FILES")
+  fi
 
   if [ -n "$ACCESS_LOG_FINDINGS" ]; then
     echo "!!! WARNING: Suspicious access log requests found (showing first hits per file):"
@@ -903,7 +768,7 @@ fi
 
 
 # --- ModSecurity logs scan (audit/debug logs) ---
-if [ "$DO_MODSEC_LOGS" -eq 1 ] && [ "$REMOTE_MODE" -eq 0 ]; then
+if [ "$DO_MODSEC_LOGS" -eq 1 ]; then
   echo -e "\n[+] Scanning ModSecurity logs (audit/debug) for blocked/suspicious requests..."
 
   MODSEC_LOG_FINDINGS=""
@@ -913,6 +778,15 @@ if [ "$DO_MODSEC_LOGS" -eq 1 ] && [ "$REMOTE_MODE" -eq 0 ]; then
   # High-signal patterns commonly present in audit/debug logs.
   # Example: ModSecurity: Access denied with code 403 (phase 2). ... [id "12345"] [msg "..."] [uri "/wp-login.php"] [client 1.2.3.4]
   MODSEC_PAT="ModSecurity:|Access denied with code|\[id \"[0-9]+\"\]|\[msg \"|\[uri \"|\[client |\[hostname \"|\[tag \""
+
+  # Extract IP from ModSecurity log line (format: [client IP])
+  collect_modsec_ip() {
+    local line="$1"
+    local ip=$(printf "%s" "$line" | sed -n -E 's/.*\[client ([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})\].*/\1/p')
+    if [ -n "$ip" ]; then
+      SUSPICIOUS_IPS=$(printf "%s\n%s" "$SUSPICIOUS_IPS" "$ip")
+    fi
+  }
 
   scan_plain_modsec_log() {
     local f="$1"
@@ -924,6 +798,12 @@ if [ "$DO_MODSEC_LOGS" -eq 1 ] && [ "$REMOTE_MODE" -eq 0 ]; then
         MODSEC_LOG_FILES=$(printf "%s\n%s\n" "$MODSEC_LOG_FILES" "$f")
         MODSEC_LOG_FINDINGS=$(printf "%s\n=== %s ===\n%s\n" "$MODSEC_LOG_FINDINGS" "$f" "$hits")
         MODSEC_MATCHED_LINES=$(printf "%s\n%s\n" "$MODSEC_MATCHED_LINES" "$(printf "%s\n" "$hits" | sed -E 's/^[0-9]+://')")
+        
+        # Extract and collect suspicious IPs from matched lines
+        while IFS= read -r ln; do
+          [ -z "$ln" ] && continue
+          collect_modsec_ip "$(printf "%s" "$ln" | sed -E 's/^[0-9]+://')"
+        done < <(printf "%s\n" "$hits")
       fi
     fi
   }
@@ -938,6 +818,12 @@ if [ "$DO_MODSEC_LOGS" -eq 1 ] && [ "$REMOTE_MODE" -eq 0 ]; then
       MODSEC_LOG_FILES=$(printf "%s\n%s\n" "$MODSEC_LOG_FILES" "$f")
       MODSEC_LOG_FINDINGS=$(printf "%s\n=== %s ===\n%s\n" "$MODSEC_LOG_FINDINGS" "$f" "$hits")
       MODSEC_MATCHED_LINES=$(printf "%s\n%s\n" "$MODSEC_MATCHED_LINES" "$(printf "%s\n" "$hits" | sed -E 's/^[0-9]+://')")
+      
+      # Extract and collect suspicious IPs from matched lines
+      while IFS= read -r ln; do
+        [ -z "$ln" ] && continue
+        collect_modsec_ip "$(printf "%s" "$ln" | sed -E 's/^[0-9]+://')"
+      done < <(printf "%s\n" "$hits")
     fi
   }
 
@@ -984,71 +870,8 @@ fi
 
 
 # --- 3. Search for Malicious Code Patterns ---
-if [ "$REMOTE_MODE" -eq 0 ]; then
-  if [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_PHPSHELL" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ]; then
-    echo -e "\n[+] Searching for malicious code patterns in PHP files..."
-  fi
-else
-  # Remote light-weight checks for suspicious endpoints and meta-generator
-  echo -e "\n[+] Remote HTTP checks: probing common WordPress endpoints and metadata..."
-  REMOTE_FINDINGS=""
-  # Helper: perform HEAD and return status code
-  http_status() {
-    local url="$1"
-    if command -v curl >/dev/null 2>&1; then
-      curl -sSL -o /dev/null -w "%{http_code}" -I "$url" 2>/dev/null || echo "000"
-    else
-      echo "000"
-    fi
-  }
-  # Helper: fetch content to temp and print path
-  http_fetch() {
-    local url="$1"
-    if ! command -v curl >/dev/null 2>&1; then
-      return 1
-    fi
-    tmpf=$(mktemp -t wp-scan-remote-XXXXXX.html)
-    if curl -fsSL "$url" -o "$tmpf"; then
-      echo "$tmpf"
-      return 0
-    else
-      rm -f "$tmpf"
-      return 1
-    fi
-  }
-
-  # Check common files
-  for name in "wp-login.php" "xmlrpc.php" "wp-admin/" "wp-includes/" "robots.txt" ".well-known"; do
-    url="$SITE_URL/$name"
-    st=$(http_status "$url")
-    if [ "$st" != "000" ] && [ "$st" -ge 200 ] && [ "$st" -lt 400 ]; then
-      REMOTE_FINDINGS=$(printf "%s\n%s\n" "$REMOTE_FINDINGS" "$url (status $st)")
-    fi
-  done
-
-  # Check homepage meta generator for WP version
-  H_TMP=$(http_fetch "$SITE_URL" 2>/dev/null || true)
-  if [ -n "$H_TMP" ] && [ -f "$H_TMP" ]; then
-    gen=$(grep -i -m1 "<meta[^>]*name=\"generator\"[^>]*>" -i -I -n "$H_TMP" 2>/dev/null || true)
-    if [ -n "$gen" ]; then
-      ver=$(sed -n -E 's/.*content=["'"']WordPress[[:space:]]*([0-9.]+)["'"'].*>/\1/pI' <<<"$gen" || true)
-      if [ -n "$ver" ]; then
-        REMOTE_FINDINGS=$(printf "%s\n%s\n" "$REMOTE_FINDINGS" "Detected WordPress version (meta): $ver")
-      else
-        # Try to extract generator content raw
-        genraw=$(sed -n -E "s/.*content=[\\\"'\\\"][^\\\"]*[\\\"'\\\"].*/&/pI" "$H_TMP" 2>/dev/null || true)
-        REMOTE_FINDINGS=$(printf "%s\n%s\n" "$REMOTE_FINDINGS" "Generator tag present: $genraw")
-      fi
-    fi
-  fi
-  [ -n "$H_TMP" ] && rm -f "$H_TMP"
-
-  if [ -n "$REMOTE_FINDINGS" ]; then
-    echo "!!! WARNING: Remote checks found potential indicators:" 
-    echo "$REMOTE_FINDINGS"
-  else
-    echo "OK: No obvious remote indicators discovered (lightweight checks)."
-  fi
+if [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_PHPSHELL" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ]; then
+  echo -e "\n[+] Searching for malicious code patterns in PHP files..."
 fi
 
 # Search for common backdoor functions
@@ -1107,7 +930,7 @@ if [ "$DO_PHPSHELL" -eq 1 ]; then
   PHPSHELL_SIG_PATTERN="C99Shell|\\bc99\\b|R57|\\br57\\b|WSO|B374K|FilesMan|IndoXploit|WebShell|FilesManager|File\\s*manager|Upload\\s*file|Download\\s*file|Symlink|php_uname|posix_geteuid|posix_getpwuid|\\bwhoami\\b|\\buname\\b|\\bid\\b|\\bpriv8\\b|cmd\\s*="
   PHPSHELL_MATCH=$(grep -R -l -I --include="*.php" -E "$PHPSHELL_SIG_PATTERN" "$SITE_PATH" 2>/dev/null)
   # Also check common shell filenames
-  PHPSHELL_NAMES=$(find "$SITE_PATH" -type f \( -iname "*wso*.php" -o -iname "*c99*.php" -o -iname "*r57*.php" -o -iname "*b374k*.php" -o -iname "*filesman*.php" -o -iname "webshell.php" -o -iname "shell.php" \) -print 2>/dev/null)
+  PHPSHELL_NAMES=$(find "$SITE_PATH" -type f $$ -iname "*wso*.php" -o -iname "*c99*.php" -o -iname "*r57*.php" -o -iname "*b374k*.php" -o -iname "*filesman*.php" -o -iname "webshell.php" -o -iname "shell.php" -o -iname "*enmnnu*.php" $$ 2>/dev/null)
   if [ -n "$PHPSHELL_MATCH" ] || [ -n "$PHPSHELL_NAMES" ]; then
     echo "!!! WARNING: Potential PHP shell indicators found. Review these files:"
     # FIX: Use command substitution to properly capture the filtered list
@@ -1184,72 +1007,6 @@ if [ "$DO_PHPSHELL" -eq 1 ]; then
   fi
 
   echo " -> Searching for stealth toggles (error_reporting(0), set_time_limit(0), @eval, etc.)..."
-fi
-
-# --- Signature-fed rule checks (apply user-provided signatures) ---
-if [ "$REMOTE_MODE" -eq 0 ] && [ -f "$SIGNATURES_FILE" ]; then
-  echo "\n[+] Applying signature rules from: $SIGNATURES_FILE"
-  SIGNATURE_MATCHES=""
-  SIG_RESULTS_FILE=$(mktemp -t wp-scan-sigresults-XXXXXX.txt)
-  sig_counter=0
-  while IFS= read -r sig; do
-    sig_trim=$(echo "$sig" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    [ -z "$sig_trim" ] && continue
-    case "$sig_trim" in
-      \#*) continue ;;
-    esac
-
-    # New signature format (backwards compatible):
-    # ruleId|severity|pattern|description
-    # If the line does not contain '|', treat as legacy ERE pattern.
-    if echo "$sig_trim" | grep -q "|"; then
-      IFS='|' read -r rule_id severity pattern description <<< "$sig_trim"
-      rule_id=$(echo "$rule_id" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-      severity=$(echo "$severity" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-      pattern=$(echo "$pattern" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-      description=$(echo "$description" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    else
-      rule_id="legacy-$sig_counter"
-      severity="warning"
-      pattern="$sig_trim"
-      description="legacy-pattern"
-      sig_counter=$((sig_counter+1))
-    fi
-
-    matches=$(grep -R -n -I --include="*.php" -E "$pattern" "$SITE_PATH" 2>/dev/null || true)
-    if [ -n "$matches" ]; then
-      # write enriched match lines to results file: path:lineno:match_text:ruleId:severity:description
-      printf "%s\n" "$matches" | while IFS= read -r mline; do
-        echo "${mline}:${rule_id}:${severity}:${description}" >> "$SIG_RESULTS_FILE"
-      done
-    fi
-  done < "$SIGNATURES_FILE"
-
-  if [ -s "$SIG_RESULTS_FILE" ]; then
-    echo "!!! WARNING: Signature rules matched files (showing first 50 matches):"
-    head -n 50 "$SIG_RESULTS_FILE"
-    # Add matched files to candidate lists
-    cut -d: -f1 "$SIG_RESULTS_FILE" | sort -u | while IFS= read -r f; do
-      ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$f")
-      POSSIBLE_HACK_FILES=$(printf "%s\n%s\n" "$POSSIBLE_HACK_FILES" "$f")
-    done
-
-    # Emit SARIF/CSV if requested (SIG_RESULTS_FILE contains enriched fields)
-    if [ -n "$SARIF_FILE" ]; then
-      if declare -f emit_sarif >/dev/null 2>&1; then
-        emit_sarif "$SARIF_FILE" "$SIG_RESULTS_FILE"
-      fi
-    fi
-    if [ -n "$CSV_FILE" ]; then
-      if declare -f emit_csv >/dev/null 2>&1; then
-        emit_csv "$CSV_FILE" "$SIG_RESULTS_FILE"
-      fi
-    fi
-  else
-    echo "OK: No signature rule matches found."
-    rm -f "$SIG_RESULTS_FILE" 2>/dev/null || true
-  fi
-fi
   STEALTH_PATTERN="error_reporting\\s*\\(\\s*0\\s*\\)|set_time_limit\\s*\\(\\s*0\\s*\\)|ini_set\\s*\\(\\s*['\"]display_errors['\"]\\s*,\\s*0\\s*\\)|@\\s*(eval|assert|system|exec|shell_exec|passthru)\\b"
   STEALTH_MATCH=$(grep -R -l -I --include="*.php" -E "$STEALTH_PATTERN" "$SITE_PATH" 2>/dev/null)
   if [ -n "$STEALTH_MATCH" ]; then
@@ -1470,7 +1227,7 @@ if [ "$DO_IMMUTABLE" -eq 1 ]; then
   else
     # Use find to execute lsattr on all files and grep to filter for the immutable flag.
     # We only care about regular files, not directories.
-    IMMUTABLE_FILES=$(find "$SITE_PATH" -type f -exec lsattr -d {} \; 2>/dev/null | awk '$1 ~ /i/ {print $2}')
+    IMMUTABLE_FILES=$(find "$SITE_PATH" -type f -exec lsattr -d {} \; 2>/dev/null | grep '^^.i' | awk '{print $2}')
     if [ -n "$IMMUTABLE_FILES" ]; then
       echo "!!! WARNING: Found immutable files. This is highly suspicious and may indicate a rootkit or backdoor."
       echo "$IMMUTABLE_FILES"
@@ -1479,6 +1236,86 @@ if [ "$DO_IMMUTABLE" -eq 1 ]; then
       echo "OK: No immutable files found."
     fi
   fi
+fi
+
+
+# --- 6.5. Check Image Headers for Malicious Code ---
+if [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
+  echo -e "\n[+] Scanning image headers for malicious code..."
+  
+  IMAGE_EXTS="jpg|jpeg|png|gif|webp|ico|svg|bmp"
+  HACKED_IMAGES=""
+  SUSPECT_COUNT=0
+  
+  # Patterns that indicate malicious code in image headers
+  PHP_PATTERN="<\?php|<\?=|<script[^>]*php"
+  EVAL_PATTERN="eval\(|base64_decode\(|gzinflate\(|assert\(|system\(|exec\(|shell_exec\(|passthru\("
+  STEALTH_PATTERN="@eval|error_reporting\(0\)|ini_set.*display_errors"
+  
+  echo " -> Scanning for PHP code in image file headers (first 1KB)..."
+  
+  # Find all image files
+  while IFS= read -r img; do
+    [ -z "$img" ] && continue
+    [ ! -f "$img" ] && continue
+    
+    # Read first 1024 bytes of the file, stripping NUL bytes to avoid command-substitution warnings
+    header=$(head -c 1024 "$img" 2>/dev/null | tr -d '\000')
+    [ -z "$header" ] && continue
+    
+    # Check for PHP tags in header
+    if echo "$header" | grep -q -E "$PHP_PATTERN" 2>/dev/null; then
+      echo "!!! WARNING: PHP code found in image header: $img"
+      HACKED_IMAGES=$(printf "%s\n%s\n" "$HACKED_IMAGES" "$img")
+      SUSPECT_COUNT=$((SUSPECT_COUNT + 1))
+      
+      if [ "$SHOW_CONTEXT" -eq 1 ]; then
+        echo " -> First 200 chars of suspicious content:"
+        echo "$header" | head -c 200 | od -c | head -10
+      fi
+      continue
+    fi
+    
+    # Check for eval/exec patterns in header
+    if echo "$header" | grep -q -E "$EVAL_PATTERN" 2>/dev/null; then
+      echo "!!! WARNING: Suspicious eval/exec pattern in image header: $img"
+      HACKED_IMAGES=$(printf "%s\n%s\n" "$HACKED_IMAGES" "$img")
+      SUSPECT_COUNT=$((SUSPECT_COUNT + 1))
+      
+      if [ "$SHOW_CONTEXT" -eq 1 ]; then
+        echo " -> Matched pattern:"
+        echo "$header" | grep -o -E ".{0,50}($EVAL_PATTERN).{0,50}" | head -3
+      fi
+      continue
+    fi
+    
+    # Check for stealth/obfuscation patterns
+    if echo "$header" | grep -q -E "$STEALTH_PATTERN" 2>/dev/null; then
+      echo "!!! WARNING: Stealth/obfuscation pattern in image header: $img"
+      HACKED_IMAGES=$(printf "%s\n%s\n" "$HACKED_IMAGES" "$img")
+      SUSPECT_COUNT=$((SUSPECT_COUNT + 1))
+      continue
+    fi
+    
+  done < <(find "$SITE_PATH" -type f -regextype posix-extended -iregex ".*\.($IMAGE_EXTS)$" 2>/dev/null | head -10000)
+  
+  if [ "$SUSPECT_COUNT" -gt 0 ]; then
+    echo "!!! WARNING: Found $SUSPECT_COUNT image(s) with suspicious headers"
+    HACKED_IMAGES=$(printf "%s\n" "$HACKED_IMAGES" | sed '/^\s*$/d' | sort -u)
+    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$HACKED_IMAGES")
+    
+    echo " -> Quick analysis tips:"
+    echo "    - Use 'head -c 2048 <file> | strings' to view header content"
+    echo "    - Use 'exiftool <file>' to check metadata"
+    echo "    - Use 'file <file>' to verify actual file type"
+    echo "    - Check file size - hacked images are often larger than normal"
+  else
+    echo "OK: No suspicious code found in image headers (scanned up to 10000 images)"
+  fi
+  
+  # Store results for summary
+  IMAGE_HEADER_FINDINGS="$HACKED_IMAGES"
+  IMAGE_HEADER_COUNT="$SUSPECT_COUNT"
 fi
 
 
@@ -1512,14 +1349,27 @@ if [ "$DO_WP_CLI" -eq 1 ]; then
     if ! "${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" core is-installed --quiet 2>/dev/null; then
       echo "!!! WARNING: WP-CLI found but not functional for this installation. Skipping WP-CLI checks."
     else
-      # 7.1 Core Integrity Check
-      echo " -> Checking core file integrity..."
-      CORE_STATUS=$("${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" core verify-checksums --format=json 2>/dev/null)
-      if [ $? -ne 0 ]; then
-        echo "!!! WARNING: WordPress core files have been modified or checksums are missing."
-        echo "$CORE_STATUS" | jq -r '.[] | "File: \(.file), Status: \(.status)"' 2>/dev/null || echo "$CORE_STATUS"
-      else
-        echo "OK: Core file integrity verified."
+      # 7.1 Core Integrity Check (optional via --verify-core)
+      if [ "$DO_VERIFY_CORE" -eq 1 ]; then
+        echo " -> Verifying core file integrity..."
+        CORE_STATUS=$("${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" core verify-checksums --format=json 2>/dev/null)
+        CORE_RC=$?
+        if [ $CORE_RC -ne 0 ]; then
+          echo "!!! WARNING: WordPress core files have been modified or checksums are missing."
+          echo "$CORE_STATUS" | jq -r '.[] | "File: \(.file), Status: \(.status)"' 2>/dev/null || echo "$CORE_STATUS"
+          # Add changed files to zip candidates (prepend site path)
+          if command -v jq >/dev/null 2>&1; then
+            BADFILES=$(printf "%s\n" "$CORE_STATUS" | jq -r '.[] | select(.status != "verified") | .file' 2>/dev/null)
+            if [ -n "$BADFILES" ]; then
+              while IFS= read -r bf; do
+                [ -z "$bf" ] && continue
+                ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$SITE_PATH/$bf")
+              done <<< "$BADFILES"
+            fi
+          fi
+        else
+          echo "OK: Core file integrity verified."
+        fi
       fi
 
       # 7.2 Plugin/Theme Status and Vulnerabilities
@@ -1570,6 +1420,133 @@ if [ "$DO_WP_CLI" -eq 1 ]; then
       if [ -n "$UPLOAD_PATH" ] && [ "$UPLOAD_PATH" != "wp-content/uploads" ]; then
         echo "!!! WARNING: Custom upload_path detected: $UPLOAD_PATH"
       fi
+
+      # Optional: restore core files via WP-CLI when requested
+      if [ "$DO_RESTORE_CORE" -eq 1 ]; then
+        echo " -> Restoring WordPress core files via WP-CLI (this will overwrite core files)..."
+        if "${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" core download --force 2>/dev/null; then
+          echo " -> Core files restored (wp core download --force succeeded)."
+        else
+          echo "!!! WARNING: Failed to restore core files via WP-CLI."
+        fi
+      fi
+    fi
+  fi
+fi
+# --- Plugin scan: scan wp-content/plugins for suspicious/fake plugins ---
+if [ "$DO_PLUGIN_SCAN" -eq 1 ]; then
+  echo -e "\n[+] Scanning wp-content/plugins for suspicious or fake plugins..."
+  PLUG_DIR="$SITE_PATH/wp-content/plugins"
+  if [ -d "$PLUG_DIR" ]; then
+    PLUGIN_PAT="(base64_decode|gzinflate|gzuncompress|gzdecode|str_rot13|eval\\(|assert\\(|shell_exec|passthru|system|exec|popen|proc_open|preg_replace.*\\/e|php_uname|posix_geteuid)"
+    PLUGIN_HITS=$(grep -R -l -I --include="*.php" -E "$PLUGIN_PAT" "$PLUG_DIR" 2>/dev/null)
+    if [ -n "$PLUGIN_HITS" ]; then
+      echo "!!! WARNING: Suspicious code found inside plugin files (showing first hits):"
+      echo "$PLUGIN_HITS" | head -50
+      ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$PLUGIN_HITS")
+    fi
+
+    SUSPECT_PLUGINS=$(find "$PLUG_DIR" -mindepth 1 -maxdepth 2 -type d 2>/dev/null | while IFS= read -r d; do
+      if ! grep -R -I -m1 -E "^[[:space:]]*Plugin Name:" "$d"/* 2>/dev/null >/dev/null; then
+        echo "$d"
+      fi
+    done)
+    if [ -n "$SUSPECT_PLUGINS" ]; then
+      echo "!!! WARNING: Plugin directories without a plugin header (possible fake plugins):"
+      echo "$SUSPECT_PLUGINS" | head -50
+      ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$SUSPECT_PLUGINS")
+    fi
+
+    RECENT_PLUGIN_MODS=$(find "$PLUG_DIR" -type f -name "*.php" -mmin -120 2>/dev/null)
+    if [ -n "$RECENT_PLUGIN_MODS" ]; then
+      echo " -> Recent plugin file modifications (last 120 minutes):"
+      echo "$RECENT_PLUGIN_MODS" | head -50
+      ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$RECENT_PLUGIN_MODS")
+    fi
+  else
+    echo " -> No plugins directory found at $PLUG_DIR"
+  fi
+fi
+
+# --- 6.7. Check for SEO Spam "Link Factory" Files ---
+if [ "$DO_SEO_SPAM" -eq 1 ]; then
+  echo -e "\n[+] Scanning for SEO Spam 'Link Factory' files..."
+  # Specifically targeting the .l10n.php pattern found on dedicated218
+  SEO_SPAM_FILES=$(find "$SITE_PATH/wp-content/languages" -name "*de_DE.l10n.php" -mtime -60 2>/dev/null)
+  if [ -n "$SEO_SPAM_FILES" ]; then
+    echo "!!! WARNING: Confirmed SEO Spam Factory files found (German Language Hijack):"
+    echo "$SEO_SPAM_FILES"
+    ZIP_CANDIDATES=$(printf "%s\n%s" "$ZIP_CANDIDATES" "$SEO_SPAM_FILES")
+
+    # Cleanup instructions printed for the operator. These are manual steps to safely remove
+    # malicious language files and restore legitimate translations using WP-CLI.
+    echo ""
+    echo "Cleanup guidance:"
+    echo " 1) Carefully review the listed files. If they are malicious, remove them, e.g.:"
+    echo "      sudo rm -f \"$SITE_PATH/wp-content/languages/<malicious-file>.php\""
+    echo " 2) Update or reinstall official translations via WP-CLI (recommended where available):"
+    echo "      cd \"$SITE_PATH\" && wp language core update --all --allow-root || true"
+    echo "      cd \"$SITE_PATH\" && wp language plugin update --all --allow-root || true"
+    echo "      cd \"$SITE_PATH\" && wp language theme update --all --allow-root || true"
+    echo " 3) To force reinstall a specific locale (example: de_DE) from wordpress.org:"
+    echo "      cd \"$SITE_PATH\" && wp language core install --force de_DE --allow-root || true"
+    echo " 4) Clear caches and search for injected links to verify cleanup (examples):"
+    echo "      cd \"$SITE_PATH\" && wp cache flush --allow-root || true"
+    echo "      grep -R --line-number --exclude-dir=wp-content/languages 'http[s]\?://[a-z0-9.-]*' . | head -50"
+    echo ""
+    echo "Notes:"
+    echo " - Do not blindly delete legitimate language files for other locales. Only remove files confirmed malicious."
+    echo " - If the site shows other compromises (backdoors, modified core/plugins/themes), prefer restore from a clean backup and rotate all credentials."
+  else
+    echo "OK: No German SEO Spam files found."
+  fi
+fi
+
+# --- 6.7b. Mass-scan all /home/* accounts for SEO Spam files ---
+if [ "$DO_SEO_SPAM_MASS" -eq 1 ]; then
+  echo -e "\n[+] Mass-scanning /home/* for SEO Spam 'Link Factory' files (de_DE.l10n.php) (backgrounded)..."
+  # Run long scan in background and save detailed report with remediation steps
+  (
+    echo "SEO Spam mass scan started: $(date -u)"
+    echo ""
+    find /home -type f -path "*/public_html/wp-content/languages/*de_DE.l10n.php" -mtime -60 2>/dev/null | while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      site_root=$(printf "%s" "$f" | sed -E 's|(.*)/public_html/wp-content/languages/.*$|\1/public_html|')
+      user=$(basename "$(dirname "$site_root")")
+      echo "ACCOUNT: $user"
+      echo "SITE_ROOT: $site_root"
+      echo "FILE: $f"
+      echo "Suggested fix:"
+      echo " 1) Inspect the file: sudo less \"$f\""
+      echo " 2) If malicious, remove the file: sudo rm -f \"$f\""
+      echo " 3) Reinstall translations and clear caches (example):"
+      echo "      cd \"$site_root\" && wp language core install --force de_DE --allow-root || true"
+      echo "      cd \"$site_root\" && wp cache flush --allow-root || true"
+      echo " 4) Search site for injected links or other backdoors:"
+      echo "      cd \"$site_root\" && grep -R --line-number --exclude-dir=wp-content/languages 'http[s]\\?:\\/\\/[a-z0-9.-]*' . | head -50"
+      echo " 5) If other compromises found, restore from clean backup and rotate creds."
+      echo "-----"
+    done
+    echo ""
+    echo "Scan completed: $(date -u)"
+  ) > /root/seospamscan.txt 2>&1 &
+  echo "Mass SEO spam scan started in background; results will be saved to /root/seospamscan.txt"
+fi
+
+# --- 6.8. Database Audit for Shadow Administrators ---
+if [ "$DO_SHADOW_ADMIN" -eq 1 ] && [ "$WP_MODE" -eq 1 ]; then
+  echo -e "\n[+] Auditing MariaDB for Shadow Administrators..."
+  DB_NAME=$(grep "DB_NAME" "$SITE_PATH/wp-config.php" | cut -d"'" -f4 2>/dev/null)
+  if [ -n "$DB_NAME" ]; then
+    PREFIX=$(mysql "$DB_NAME" -N -s -e "SHOW TABLES LIKE '%_users';" 2>/dev/null | sed 's/users//')
+    if [ -n "$PREFIX" ]; then
+      SHADOW_USERS=$(mysql "$DB_NAME" -N -s -e "SELECT user_login FROM ${PREFIX}users WHERE user_login LIKE '%admin_%' OR user_login LIKE '%bckup%' OR user_login LIKE '%support%';" 2>/dev/null)
+      if [ -n "$SHADOW_USERS" ]; then
+        echo "!!! WARNING: Potential Shadow Administrators found in database '$DB_NAME':"
+        echo "$SHADOW_USERS"
+      else
+        echo "OK: No suspicious admin users found in database."
+      fi
     fi
   fi
 fi
@@ -1593,57 +1570,6 @@ fi
 
 # --- Human-friendly summary (always shown) ---
 summary_count_lines() { printf "%s\n" "$1" | sed '/^\s*$/d' | wc -l | awk '{print $1}'; }
-
-# Convert a newline-delimited shell variable into a JSON array safely-ish.
-# This is a lightweight helper that escapes backslashes and quotes and wraps
-# each line in quotes. It is not a full JSON encoder but is adequate for
-# simple file paths and messages.
-to_json_array() {
-  local v="$1"
-  if [ -z "$v" ]; then
-    echo "[]"
-    return
-  fi
-  # Escape backslashes and quotes, then wrap lines in quotes and join with commas
-  printf "%s\n" "$v" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/  \"/' -e 's/$/\"/' | paste -sd ",\n" - | sed '1s/^/[\n/; $ s/$/\n]/'
-}
-
-# Emit a minimal SARIF v2.1.0 report capturing files with findings.
-emit_sarif() {
-  local out="$1"
-  # Build results from POSSIBLE_HACK_FILES and ACCESS_LOG_FINDINGS / MODSEC_LOG_FINDINGS
-  echo "{\n  \"version\": \"2.1.0\",\n  \"runs\": [\n    {\n      \"tool\": {\"driver\": {\"name\": \"wp-scan\"}},\n      \"results\": [" > "$out"
-  # Add file-based results
-  if [ -n "$POSSIBLE_HACK_FILES" ]; then
-    printf "%s\n" "$POSSIBLE_HACK_FILES" | sed '/^\s*$/d' | sort -u | while IFS= read -r f; do
-      # include a result with just the file path
-      echo "        {\"ruleId\": \"possible-hack\", \"message\": {\"text\": \"High-signal match: $f\"}, \"locations\": [{\"physicalLocation\": {\"artifactLocation\": {\"uri\": \"$f\"}}}] }," >> "$out"
-    done
-  fi
-  # Trim trailing comma and close JSON
-  # Remove last comma safely
-  perl -0777 -pe 's/,\s*\z/\n/' -i "$out" 2>/dev/null || true
-  echo "      ]\n    }\n  ]\n}" >> "$out"
-  echo "SARIF written to: $out"
-}
-
-# Emit a simple CSV with file,module,message
-emit_csv() {
-  local out="$1"
-  echo "file,module,message" > "$out"
-  if [ -n "$POSSIBLE_HACK_FILES" ]; then
-    printf "%s\n" "$POSSIBLE_HACK_FILES" | sed '/^\s*$/d' | sort -u | while IFS= read -r f; do
-      echo "\"$f\",\"possible-hack\",\"High-signal match\"" >> "$out"
-    done
-  fi
-  # Include access log findings as extra rows
-  if [ -n "$ACCESS_LOG_FILES" ]; then
-    printf "%s\n" "$ACCESS_LOG_FILES" | sed '/^\s*$/d' | sort -u | while IFS= read -r f; do
-      echo "\"$f\",\"access-log\",\"Suspicious access log patterns\"" >> "$out"
-    done
-  fi
-  echo "CSV written to: $out"
-}
 SUMMARY_WARN=$(grep -c "!!! WARNING" "$LOG_FILE" 2>/dev/null || true)
 SUMMARY_WARN=${SUMMARY_WARN:-0}
 SUMMARY_STATUS="OK"; [ "$SUMMARY_WARN" -gt 0 ] && SUMMARY_STATUS="WARNINGS"
@@ -1679,6 +1605,7 @@ echo " -> ModSecurity log files:   $(summary_count_lines "$MODSEC_LOG_FILES")"
 echo " -> Dyn-exec hits (filtered):$(summary_count_lines "$FILTERED_DYN_EXEC")"
 echo " -> One-liner hits (filt):   $(summary_count_lines "$FILTERED_ONELINER")"
 echo " -> Immutable files:         $(summary_count_lines "$IMMUTABLE_FILES")"
+echo " -> Image headers flagged:   $(summary_count_lines "$IMAGE_HEADER_FINDINGS")"
 
 if [ -n "$POSSIBLE_HACK_FILES" ]; then
   if command -v sort >/dev/null 2>&1; then
@@ -1699,6 +1626,44 @@ fi
 if [ -n "$MODSEC_LOG_FINDINGS" ]; then
   echo " -> ModSecurity highlights (first ~20 lines across files):"
   echo "$MODSEC_LOG_FINDINGS" | head -20
+fi
+
+
+# --- Suspicious IPs Summary ---
+if [ -n "$SUSPICIOUS_IPS" ]; then
+  echo ""
+  echo "=============================================="
+  echo "SUSPICIOUS IPs DETECTED"
+  echo "=============================================="
+  echo "The following IP addresses were found making suspicious/malicious requests:"
+  echo ""
+  
+  # Remove empty lines, sort, unique, and count occurrences
+  UNIQUE_IPS=$(printf "%s\n" "$SUSPICIOUS_IPS" | sed '/^$/d' | sort | uniq -c | sort -rn)
+  TOTAL_UNIQUE=$(printf "%s\n" "$SUSPICIOUS_IPS" | sed '/^$/d' | sort -u | wc -l | awk '{print $1}')
+  
+  echo "Total unique suspicious IPs: $TOTAL_UNIQUE"
+  echo ""
+  echo "IP Address           | Request Count"
+  echo "---------------------|--------------"
+  printf "%s\n" "$UNIQUE_IPS" | while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    count=$(echo "$line" | awk '{print $1}')
+    ip=$(echo "$line" | awk '{print $2}')
+    printf "%-20s | %s\n" "$ip" "$count"
+  done
+  
+  echo ""
+  echo "Consider blocking these IPs via firewall, .htaccess, or server configuration."
+  echo "=============================================="
+  echo ""
+  
+  # Save to file for easy reference
+  SUSPICIOUS_IPS_FILE="${SITE_PATH}/suspicious-ips.txt"
+  if printf "%s\n" "$SUSPICIOUS_IPS" | sed '/^$/d' | sort -u > "$SUSPICIOUS_IPS_FILE" 2>/dev/null; then
+    echo "Suspicious IPs have been saved to: $SUSPICIOUS_IPS_FILE"
+    echo ""
+  fi
 fi
 
 
@@ -1737,7 +1702,7 @@ fi
 # --- JSON Summary Output (optional) ---
 if [ "$JSON_OUTPUT" -eq 1 ]; then
   # derive counts based on variables populated above (fallback to grepping the log)
-  count_lines() { echo "$1" | sed '/^\s*$/d' | wc -l | awk '{print $1}'; }
+  count_lines() { echo "$1" | sed '/^^\s*$/d' | wc -l | awk '{print $1}'; }
   WARN_COUNT=$(grep -c "!!! WARNING" "$LOG_FILE" 2>/dev/null || true)
   WARN_COUNT=${WARN_COUNT:-0}
   STATUS="OK"; [ "$WARN_COUNT" -gt 0 ] && STATUS="WARNINGS"
@@ -1782,13 +1747,6 @@ if [ "$JSON_OUTPUT" -eq 1 ]; then
   echo "  \"oneliner\": $ONELINER_COUNT,"
   echo "  \"immutable\": $IMMUTABLE_COUNT,"
   echo "  \"wp_cli\": $WP_CLI_COUNT"
-  echo " },"
-  echo " \"lists\": {"
-  echo "  \"recent_files\": $(to_json_array "$RECENT_FILES"),"
-  echo "  \"uploads_php_files\": $(to_json_array "$UPLOADS_PHP_FILES"),"
-  echo "  \"possible_hack_files\": $(to_json_array "$POSSIBLE_HACK_FILES"),"
-  echo "  \"access_log_files\": $(to_json_array "$ACCESS_LOG_FILES"),"
-  echo "  \"modsec_log_files\": $(to_json_array "$MODSEC_LOG_FILES")"
   echo " }"
   echo "}"
 fi
@@ -1802,7 +1760,7 @@ if [ "$ZIP_ENABLED" -eq 1 ]; then
     echo "Creating zip archive of flagged files: $ZIP_TARGET_ZIP"
     FILE_LIST=$(mktemp -t wp-scan-ziplist-XXXXXX.txt)
     # Collect only existing files, unique (absolute paths)
-    printf "%s\n" "$ZIP_CANDIDATES" | sed '/^\s*$/d' | while IFS= read -r p; do
+    printf "%s\n" "$ZIP_CANDIDATES" | sed '/^^\s*$/d' | while IFS= read -r p; do
       [ -f "$p" ] && echo "$p"
     done | sort -u > "$FILE_LIST"
     COUNT=$(wc -l < "$FILE_LIST" | awk '{print $1}')

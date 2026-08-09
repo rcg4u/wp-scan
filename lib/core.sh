@@ -14,11 +14,6 @@ SITE_PATH=""
 SITE_OWNER=""
 LOG_FILE=""
 ZIP_CANDIDATES=""
-# Remote / runtime flags
-DRY_RUN=0
-SARIF_FILE=""
-CSV_FILE=""
-SIGNATURES_FILE="${SIGNATURES_DIR:-$(dirname "$0")/../signatures}/latest-signatures.txt"
 
 # WordPress mode (default on). Disable with --no-wordpress
 WP_MODE=1
@@ -46,7 +41,7 @@ EXPLICIT_MODULE_SELECTION=0
 DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_UPLOADS_PHP=1; DO_BACKDOOR=1
 DO_OBFUSCATED=1; DO_PHPSHELL=1; DO_HIDDEN=1; DO_SUPERGLOBAL=1; DO_CURL=1
 DO_WPVER=1; DO_PERMS=1; DO_IMMUTABLE=1; DO_VERIFICATION=1; DO_ACCESS_LOGS=1
-DO_DYN_EXEC=1; DO_ONELINER=1; DO_WP_CLI=1
+DO_DYN_EXEC=1; DO_ONELINER=1; DO_WP_CLI=1; DO_IMAGE_HEADERS=1
 
 # --- Helper functions shared across modules ---
 
@@ -54,7 +49,7 @@ enable_only_defaults() {
     DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0
     DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0
     DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_ACCESS_LOGS=0
-    DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0
+    DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0; DO_IMAGE_HEADERS=0
 }
 
 set_module_flag() {
@@ -66,11 +61,12 @@ set_module_flag() {
             ;;
         phpshell) DO_PHPSHELL=1 ;;
         uploads-php) DO_UPLOADS_PHP=1 ;;
+        image-headers) DO_IMAGE_HEADERS=1 ;;
         all)
             DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_UPLOADS_PHP=1; DO_BACKDOOR=1
             DO_OBFUSCATED=1; DO_PHPSHELL=1; DO_HIDDEN=1; DO_SUPERGLOBAL=1; DO_CURL=1
             DO_WPVER=1; DO_PERMS=1; DO_IMMUTABLE=1; DO_VERIFICATION=1; DO_ACCESS_LOGS=1
-            DO_DYN_EXEC=1; DO_ONELINER=1; DO_WP_CLI=1
+            DO_DYN_EXEC=1; DO_ONELINER=1; DO_WP_CLI=1; DO_IMAGE_HEADERS=1
             ;;
     esac
 }
@@ -83,6 +79,7 @@ clear_module_flag() {
             ;;
         phpshell) DO_PHPSHELL=0 ;;
         uploads-php) DO_UPLOADS_PHP=0 ;;
+        image-headers) DO_IMAGE_HEADERS=0 ;;
         all)
             enable_only_defaults
             ;;
@@ -104,6 +101,7 @@ scan_wp_version() { :; }
 scan_permissions() { :; }
 scan_immutable() { :; }
 scan_wp_cli() { :; }
+scan_image_headers() { :; }
 
 usage() {
     cat <<'USAGE'
@@ -143,6 +141,7 @@ Module Triggers (enable/disable individually):
   --dyn-exec / --no-dyn-exec
   --oneliner / --no-oneliner
   --wp-cli / --no-wp-cli
+  --image-headers / --no-image-headers
   --help                 Show usage
 
 Example:
@@ -217,9 +216,8 @@ parse_args() {
             --no-oneliner) EXPLICIT_MODULE_SELECTION=1; clear_module_flag oneliner; shift ;;
             --wp-cli) EXPLICIT_MODULE_SELECTION=1; DO_WP_CLI=1; shift ;;
             --no-wp-cli) EXPLICIT_MODULE_SELECTION=1; DO_WP_CLI=0; shift ;;
-            --dry-run) DRY_RUN=1; shift ;;
-            --sarif) SARIF_FILE="$2"; shift 2 ;;
-            --csv) CSV_FILE="$2"; shift 2 ;;
+            --image-headers) EXPLICIT_MODULE_SELECTION=1; set_module_flag image-headers; shift ;;
+            --no-image-headers) EXPLICIT_MODULE_SELECTION=1; clear_module_flag image-headers; shift ;;
 
             -h|--help)
                 usage
@@ -242,14 +240,14 @@ parse_args() {
         local _r=$DO_RECENT _s=$DO_SUSPICIOUS _u=$DO_UPLOADS _up=$DO_UPLOADS_PHP _b=$DO_BACKDOOR
         local _o=$DO_OBFUSCATED _ps=$DO_PHPSHELL _h=$DO_HIDDEN _sg=$DO_SUPERGLOBAL _c=$DO_CURL
         local _wv=$DO_WPVER _p=$DO_PERMS _im=$DO_IMMUTABLE _vf=$DO_VERIFICATION _al=$DO_ACCESS_LOGS
-        local _de=$DO_DYN_EXEC _ol=$DO_ONELINER _wpc=$DO_WP_CLI
+        local _de=$DO_DYN_EXEC _ol=$DO_ONELINER _wpc=$DO_WP_CLI _ih=$DO_IMAGE_HEADERS
 
         enable_only_defaults
 
         DO_RECENT=$_r; DO_SUSPICIOUS=$_s; DO_UPLOADS=$_u; DO_UPLOADS_PHP=$_up; DO_BACKDOOR=$_b
         DO_OBFUSCATED=$_o; DO_PHPSHELL=$_ps; DO_HIDDEN=$_h; DO_SUPERGLOBAL=$_sg; DO_CURL=$_c
         DO_WPVER=$_wv; DO_PERMS=$_p; DO_IMMUTABLE=$_im; DO_VERIFICATION=$_vf; DO_ACCESS_LOGS=$_al
-        DO_DYN_EXEC=$_de; DO_ONELINER=$_ol; DO_WP_CLI=$_wpc
+        DO_DYN_EXEC=$_de; DO_ONELINER=$_ol; DO_WP_CLI=$_wpc; DO_IMAGE_HEADERS=$_ih
     fi
 }
 
@@ -358,94 +356,6 @@ output_json_if_requested() {
     echo "}"
 }
 
-emit_csv() {
-    # emit_csv <csv_file> <results_file>
-    local csv_file="$1"; shift || true
-    local results_file="$1"; shift || true
-    [ -n "$csv_file" ] || return 0
-    if [ ! -f "$results_file" ]; then
-        echo "CSV emission skipped: file list not found: $results_file"
-        return 0
-    fi
-
-    {
-        echo "file,line,ruleId,severity,description,message"
-        while IFS= read -r line; do
-            # Parse enriched format: path:lineno:match_text:ruleId:severity:description
-            file=$(printf '%s' "$line" | awk -F ':' '{print $1}')
-            lineno=$(printf '%s' "$line" | awk -F ':' '{print $2}')
-            ruleId=$(printf '%s' "$line" | awk -F ':' '{print $(NF-2)}')
-            severity=$(printf '%s' "$line" | awk -F ':' '{print $(NF-1)}')
-            description=$(printf '%s' "$line" | awk -F ':' '{print $NF}')
-            # message is content between the second field and the last three fields
-            message=$(printf '%s' "$line" | sed -E 's/^[^:]+:[0-9]+:(.*):[^:]+:[^:]+:[^:]+$/\1/')
-            # Escape double quotes in message
-            message=$(printf '%s' "$message" | sed 's/"/""/g')
-            printf '"%s",%s,"%s","%s","%s","%s"\n' "$file" "$lineno" "$ruleId" "$severity" "$description" "$message"
-        done < "$results_file"
-    } > "$csv_file"
-    echo "CSV report written: $csv_file"
-}
-
-emit_sarif() {
-    # emit_sarif <sarif_file> <results_file>
-    local sarif_file="$1"; shift || true
-    local results_file="$1"; shift || true
-    [ -n "$sarif_file" ] || return 0
-    if [ ! -f "$results_file" ]; then
-        echo "SARIF emission skipped: file list not found: $results_file"
-        return 0
-    fi
-
-    # Build results as a JSON array. Use jq when available for correctness.
-    if command -v jq >/dev/null 2>&1; then
-        # Start with empty results
-        local results_json
-        results_json="[]"
-        while IFS= read -r line; do
-            file=$(printf '%s' "$line" | awk -F ':' '{print $1}')
-            lineno=$(printf '%s' "$line" | awk -F ':' '{print $2}')
-            ruleId=$(printf '%s' "$line" | awk -F ':' '{print $(NF-2)}')
-            severity=$(printf '%s' "$line" | awk -F ':' '{print $(NF-1)}')
-            description=$(printf '%s' "$line" | awk -F ':' '{print $NF}')
-            message=$(printf '%s' "$line" | sed -E 's/^[^:]+:[0-9]+:(.*):[^:]+:[^:]+:[^:]+$/\1/')
-            # Determine SARIF level
-            if [ "$severity" = "error" ] || [ "$severity" = "high" ]; then
-                level="error"
-            else
-                level="warning"
-            fi
-            # Append to results_json
-            results_json=$(printf '%s' "$results_json" | jq -c --arg file "$file" --argjson startLine "$lineno" --arg ruleId "$ruleId" --arg level "$level" --arg description "$description" --arg message "$message" '. += [{"ruleId":$ruleId,"level":$level,"message":{"text":$message},"locations":[{"physicalLocation":{"artifactLocation":{"uri":$file},"region":{"startLine":$startLine}}}],"properties":{"description":$description}}]')
-        done < "$results_file"
-
-        jq -n --argjson results "$results_json" '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"wp-scan"}},"results":$results}]}' > "$sarif_file"
-        echo "SARIF report written: $sarif_file"
-    else
-        # Fallback: simple SARIF-like JSON with minimal fields (best-effort)
-        echo '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"wp-scan"}},"results":[' > "$sarif_file"
-        first=1
-        while IFS= read -r line; do
-            file=$(printf '%s' "$line" | awk -F ':' '{print $1}')
-            lineno=$(printf '%s' "$line" | awk -F ':' '{print $2}')
-            ruleId=$(printf '%s' "$line" | awk -F ':' '{print $(NF-2)}')
-            severity=$(printf '%s' "$line" | awk -F ':' '{print $(NF-1)}')
-            description=$(printf '%s' "$line" | awk -F ':' '{print $NF}')
-            message=$(printf '%s' "$line" | sed -E 's/^[^:]+:[0-9]+:(.*):[^:]+:[^:]+:[^:]+$/\1/')
-            if [ "$first" -eq 1 ]; then
-                first=0
-            else
-                echo ',' >> "$sarif_file"
-            fi
-            esc_msg=$(printf '%s' "$message" | sed 's/"/\\"/g')
-            esc_file=$(printf '%s' "$file" | sed 's/"/\\"/g')
-            echo "{\"ruleId\":\"${ruleId}\",\"level\":\"${severity}\",\"message\":{\"text\":\"${esc_msg}\"},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"${esc_file}\"},\"region\":{\"startLine\":${lineno}}}}]}" >> "$sarif_file"
-        done < "$results_file"
-        echo ']}}]}' >> "$sarif_file"
-        echo "SARIF report written (best-effort): $sarif_file"
-    fi
-}
-
 zip_flagged_files_if_requested() {
     [ "$ZIP_ENABLED" -eq 1 ] || return 0
 
@@ -454,11 +364,10 @@ zip_flagged_files_if_requested() {
         return 0
     fi
 
-    echo "Preparing zip archive of flagged files: $ZIP_TARGET_ZIP"
+    echo "Creating zip archive of flagged files: $ZIP_TARGET_ZIP"
     local FILE_LIST
     FILE_LIST=$(mktemp -t wp-scan-ziplist-XXXXXX.txt)
 
-    # Normalize input and collect existing files
     printf "%s\n" "$ZIP_CANDIDATES" | sed '/^\s*$/d' | while IFS= read -r p; do
         [ -f "$p" ] && echo "$p"
     done | sort -u > "$FILE_LIST"
@@ -467,37 +376,24 @@ zip_flagged_files_if_requested() {
     COUNT=$(wc -l < "$FILE_LIST" | awk '{print $1}')
 
     if [ "$COUNT" -gt 0 ]; then
-        if [ "$DRY_RUN" -eq 1 ]; then
-            echo "DRY-RUN: would create zip: $ZIP_TARGET_ZIP with $COUNT files (showing first 20):"
-            head -n 20 "$FILE_LIST" || true
-        else
-            zip -@ "$ZIP_TARGET_ZIP" < "$FILE_LIST"
+        zip -@ "$ZIP_TARGET_ZIP" < "$FILE_LIST"
 
-            local MANIFEST_TMP
-            MANIFEST_TMP=$(mktemp -t wp-scan-manifest-XXXXXX.txt)
-            {
-                echo "wp-scan manifest"
-                echo "site: $SITE_PATH"
-                echo "created: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-                echo "files:"
-                cat "$FILE_LIST"
-            } > "$MANIFEST_TMP"
+        local MANIFEST_TMP
+        MANIFEST_TMP=$(mktemp -t wp-scan-manifest-XXXXXX.txt)
+        {
+            echo "wp-scan manifest"
+            echo "site: $SITE_PATH"
+            echo "created: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "files:"
+            cat "$FILE_LIST"
+        } > "$MANIFEST_TMP"
 
-            local MANIFEST_NAME="wp-scan-manifest.txt"
-            cp "$MANIFEST_TMP" "$MANIFEST_NAME"
-            zip "$ZIP_TARGET_ZIP" "$MANIFEST_NAME" >/dev/null 2>&1
-            rm -f "$MANIFEST_NAME" "$MANIFEST_TMP"
+        local MANIFEST_NAME="wp-scan-manifest.txt"
+        cp "$MANIFEST_TMP" "$MANIFEST_NAME"
+        zip "$ZIP_TARGET_ZIP" "$MANIFEST_NAME" >/dev/null 2>&1
+        rm -f "$MANIFEST_NAME" "$MANIFEST_TMP"
 
-            echo "Zip created ($COUNT files): $ZIP_TARGET_ZIP (includes $MANIFEST_NAME)"
-        fi
-
-        # Emit SARIF/CSV if requested
-        if [ -n "$SARIF_FILE" ]; then
-            emit_sarif "$SARIF_FILE" "$FILE_LIST"
-        fi
-        if [ -n "$CSV_FILE" ]; then
-            emit_csv "$CSV_FILE" "$FILE_LIST"
-        fi
+        echo "Zip created ($COUNT files): $ZIP_TARGET_ZIP (includes $MANIFEST_NAME)"
     else
         echo "No files to zip. Archive not created."
     fi

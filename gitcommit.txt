@@ -1,0 +1,21 @@
+Please commit the following changes from this repository to your PC and push to GitHub.
+
+Suggested commits (apply and push from your workstation):
+
+1) "Add menu option 40: background mass SEO spam scan (/root/seospamscan.txt)"
+   - Modified: wp-scan.sh (adds menu option 40 and backgrounded mass scan)
+   - Note: This scan writes findings and remediation instructions to /root/seospamscan.txt.
+
+2) "Update README: document mass-scan SEO spam option and behavior"
+   - Modified: README.md (changelog entry)
+
+3) "Add gitcommit.txt to record commit instructions"
+
+How to apply locally:
+- Pull/checkout the repository on your PC
+- Copy the changed files into the repo (or pull if using remote)
+- Run: git add wp-scan.sh README.md gitcommit.txt
+- git commit -m "Add menu option 40: background mass SEO spam scan"
+- git push origin main
+
+If using a different branch name, adjust the push accordingly.

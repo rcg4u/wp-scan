@@ -39,6 +39,7 @@ interactive_menu() {
         echo " 16) $(print_module_status "dyn-exec" DO_DYN_EXEC | tr -d '\n')      (triggers: 16, dyn-exec)"
         echo " 17) $(print_module_status "oneliner" DO_ONELINER | tr -d '\n')      (triggers: 17, oneliner)"
         echo " 18) $(print_module_status "wp-cli" DO_WP_CLI | tr -d '\n')        (triggers: 18, wp-cli)"
+        echo " 19) $(print_module_status "image-headers" DO_IMAGE_HEADERS | tr -d '\n') (triggers: 19, image-headers)"
 
         printf "\nSelect> "
         read -r line
@@ -73,6 +74,7 @@ interactive_menu() {
                 16|dyn-exec|dyn_exec) DO_DYN_EXEC=$((1-DO_DYN_EXEC)) ;;
                 17|oneliner) DO_ONELINER=$((1-DO_ONELINER)) ;;
                 18|wp-cli|wp_cli) DO_WP_CLI=$((1-DO_WP_CLI)) ;;
+                19|image-headers|image_headers) DO_IMAGE_HEADERS=$((1-DO_IMAGE_HEADERS)) ;;
                 a|A|all) set_module_flag all ;;
                 n|N|none) enable_only_defaults ;;
                 r|R|run) return 0 ;;

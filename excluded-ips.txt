@@ -1,12 +1,12 @@
-# excluded-ips.txt
-# One IP per line.
-# Lines starting with # are comments.
-#
-# If this file exists next to wp-scan.sh, access-log scan OUTPUT will hide
-# any matched lines containing one of these IPs.
-# Note: the scan still reads all logs; this only filters results output.
-#
-# Examples:
-# 127.0.0.1
-# 192.0.2.10
-# 2001:db8::1
+66.45.253.218
+66.45.253.219
+66.45.253.220
+66.45.253.221
+66.45.253.222
+
+75.129.232.62
+66.45.253.218
+66.45.253.219
+66.45.253.220
+66.45.253.221
+66.45.253.222

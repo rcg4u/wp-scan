@@ -44,6 +44,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/modules/permissions.sh"
 # shellcheck source=modules/immutable.sh
 . "$SCRIPT_DIR/modules/immutable.sh"
+# shellcheck source=modules/image_headers.sh
+. "$SCRIPT_DIR/modules/image_headers.sh"
 # shellcheck source=modules/wp_cli.sh
 . "$SCRIPT_DIR/modules/wp_cli.sh"
 

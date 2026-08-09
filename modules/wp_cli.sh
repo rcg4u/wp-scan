@@ -33,6 +33,16 @@ scan_wp_cli() {
         echo "OK: Core file integrity verified."
     fi
 
+    echo " -> Verifying plugin checksums..."
+    local plugin_checks
+    plugin_checks=$(wp $WP_ALLOW_ROOT plugin verify-checksums --format=json 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        echo "!!! WARNING: Plugin checksums verification failed or modifications detected."
+        echo "$plugin_checks" | jq -r '.[] | " - \(.file // .) (Status: \(.status // .))"' 2>/dev/null || echo "$plugin_checks"
+    else
+        echo "OK: Plugin checksums verified."
+    fi
+
     echo " -> Checking plugin and theme status..."
 
     local plugin_status

@@ -14,6 +14,14 @@ scan_access_logs() {
 
     local scan_pattern="(\?[^ ]*(cmd=|exec=|system=|shell=|base64|eval|assert|GLOBALS|_POST\$|_GET\$))|(/(wp-admin|wp-login\.php)\.php)|(/\.env)|(/wp-config\.php)|(/xmlrpc\.php)|(/\.git/)|(/cgi-bin/)|((/|%2f)(c99|r57|wso|b374k)[^ ]*\.php)|((/|%2f)shell[^ ]*\.php)|((/|%2f)webshell[^ ]*\.php)|((union[+%20]+select|information_schema|sleep\$|benchmark\$)|((/|%2f)etc(/|%2f)passwd)|\b(base64_decode|gzinflate|str_rot13|php://input)\b)"
 
+    collect_ip_from_log() {
+        local line="$1"
+        local ip=$(printf "%s" "$line" | grep -oE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
+        if [ -n "$ip" ]; then
+            SUSPICIOUS_IPS=$(printf "%s\n%s" "$SUSPICIOUS_IPS" "$ip")
+        fi
+    }
+
     scan_plain_log() {
         local f="$1"; [ -f "$f" ] || return 0
         if grep -Iq . "$f" 2>/dev/null; then
@@ -22,6 +30,12 @@ scan_access_logs() {
             if [ -n "$hits" ]; then
                 files_found=$(printf "%s\n%s\n" "$files_found" "$f")
                 findings=$(printf "%s\n=== %s ===\n%s\n" "$findings" "$f" "$hits")
+                
+                # Collect IPs from matched lines
+                while IFS= read -r ln; do
+                    [ -z "$ln" ] && continue
+                    collect_ip_from_log "$(printf "%s" "$ln" | sed -E 's/^[0-9]+://')"
+                done < <(printf "%s\n" "$hits")
             fi
         fi
     }
@@ -34,6 +48,12 @@ scan_access_logs() {
         if [ -n "$hits" ]; then
             files_found=$(printf "%s\n%s\n" "$files_found" "$f")
             findings=$(printf "%s\n=== %s ===\n%s\n" "$findings" "$f" "$hits")
+            
+            # Collect IPs from matched lines
+            while IFS= read -r ln; do
+                [ -z "$ln" ] && continue
+                collect_ip_from_log "$(printf "%s" "$ln" | sed -E 's/^[0-9]+://')"
+            done < <(printf "%s\n" "$hits")
         fi
     }
 

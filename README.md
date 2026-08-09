@@ -26,8 +26,6 @@ Generic WordPress and site security scanner (Bash) that surfaces suspicious chan
 - **Permissions**: surface world‑writable files outside cache/uploads
 - **Verification files**: detect top‑level verification HTML and any files in `.well-known` (fixes prior search)
 - **Access logs**: scan `/home/<user>/access-logs` and `/home/<user>/logs` for suspicious request patterns (webshell probes, traversal, SQLi markers, etc.)
-- **ModSecurity logs**: scan common ModSecurity audit/debug logs under `/var/log/*` for access denials and rule hits (rule id/message/uri/client when present)
-- **Excluded IPs (results)**: hide known/noisy IPs from access-log scan output via `excluded-ips.txt` or `--exclude-ips-file` (scan still reads all logs)
 - **Email notifications**: send the full report via mail/sendmail/msmtp when warnings are found
 - **JSON output**: machine‑readable summary for automation
 - **Exit code control**: choose between binary 0/1 or counts (capped to 254)
@@ -50,19 +48,6 @@ bash wp-scan.sh [options] /path/to/site/root
 
 If no arguments are provided, usage is shown.
 
-Note: This script now enables strict mode (set -euo pipefail) and includes additional runtime checks. Some optional features require external tools (jq, zip, gzip, wp, lsattr); the script will warn if they're unavailable and skip related checks.
-
-The top-level wp-scan.sh now delegates to a modular implementation (wp-scan-mod.sh + lib/) to consolidate helper functions and make the codebase easier to extend and test.
-
-New features added:
-- More robust uploads directory scanning (avoids subshell variable scoping issues)
-- Improved JSON output with per-module file lists
-- Helpers to convert lists into JSON arrays for machine consumption
-- Remote HTTP scan mode: use --url <site-url> to perform lightweight remote checks (meta generator, common endpoints)
-- Dry-run mode: --dry-run to show what would be done without making changes
-- Verbosity: -v/--verbose to increase verbosity
-
-
 ### Options
 
 - `--email <addr>`: send report to this address if warnings were found
@@ -78,20 +63,11 @@ New features added:
 - `--exit-code <binary|count>`: exit 0/1 in binary mode or return the warning count (capped to 254)
 - `--with-cache`: include `wp-content/cache` in the recent files scan (excluded by default)
 - `--zip <filename.zip>`: create a zip archive containing flagged files (recent changes, PHP shells, backdoor/obfuscation matches, hidden dotfiles, superglobal patterns, verification files, uploads PHP, world‑writable, filtered cURL, dynamic execution, one-liner shells, immutable files). Entries use absolute paths, and a `wp-scan-manifest.txt` is included listing all full paths for easy reference.
-- `--dry-run`: show actions that would be taken (archives, signature updates) without modifying files or creating archives
-- `--sarif <file>`: write a minimal SARIF v2.1.0 report containing flagged file locations
-- `--csv <file>`: write a simple CSV report (file,module,message) for consumption by triage tools
-- `--exclude-ips-file <file>`: file containing IPs to exclude from access-log *results* (one IP per line; `#` comments allowed)
 - `--scan-all`: force-enable all modules for this run (overrides default non‑WP exclusions)
 
 Environment variables for email:
 
 - `WP_SCAN_EMAIL_TO`, `WP_SCAN_EMAIL_FROM`, `WP_SCAN_EMAIL_SUBJECT`, `WP_SCAN_EMAIL_ALWAYS`
-
-Environment variables:
-
-- `WP_SCAN_EXCLUDED_IPS_FILE`: same as `--exclude-ips-file` (optional)
-- `NO_COLOR`: set to disable ANSI color in the Summary output
 
 ### Module triggers
 
@@ -113,15 +89,8 @@ Environment variables:
 - `--perms` / `--no-perms`
 - `--verification` / `--no-verification`
 - `--access-logs` / `--no-access-logs`
-- `--modsec-logs` / `--no-modsec-logs`
 
-Modules: `recent`, `suspicious`, `uploads`, `uploads-php`, `backdoor`, `obfuscation`, `phpshell`, `dyn-exec`, `oneliner`, `wp-cli`, `immutable`, `hidden`, `superglobal`, `curl`, `wpver`, `perms`, `verification`, `access-logs`, `modsec-logs`, `all`
-
-Note on module triggers:
-
-- If you pass one or more **enable** triggers (example: `--modsec-logs`), the script will run **only** those enabled modules for that run.
-- Use `--scan-all` if you want the full scan.
-- `--no-...` triggers simply disable modules from the default full scan.
+Modules: `recent`, `suspicious`, `uploads`, `uploads-php`, `backdoor`, `obfuscation`, `phpshell`, `dyn-exec`, `oneliner`, `wp-cli`, `immutable`, `hidden`, `superglobal`, `curl`, `wpver`, `perms`, `verification`, `access-logs`, `all`
 
 ### Interactive menu
 
@@ -140,11 +109,10 @@ Run with `--menu` and enter selections like `1,3,8`:
 11) Superglobal backdoors (`--superglobal`)
 12) Verification files (.well-known & top-level) (`--verification`)
 13) Access logs scan (`--access-logs`)
-14) ModSecurity logs scan (`--modsec-logs`)
-15) Dynamic execution patterns (`--dyn-exec`)
-16) Potential one-liner shells (`--oneliner`)
-17) WP-CLI deep checks (`--wp-cli`)
-18) Immutable files (+i attribute) (`--immutable`)
+14) Dynamic execution patterns (`--dyn-exec`)
+15) Potential one-liner shells (`--oneliner`)
+16) WP-CLI deep checks (`--wp-cli`)
+17) Immutable files (+i attribute) (`--immutable`)
 
 ### JSON output
 
@@ -171,8 +139,7 @@ When `--json` is set, a compact JSON summary like below is printed:
     "curl": 0,
     "perms_world_writable": 0,
     "verification_files": 1,
-    "access_logs": 2,
-    "modsec_logs": 1
+    "access_logs": 2
   }
 }
 ```
@@ -207,62 +174,9 @@ bash wp-scan.sh --with-cache /var/www/html/site
 bash wp-scan.sh --zip /var/www/html/scan-flags.zip /var/www/html/site
 ```
 
-### Examples for sleepyhosting (user: sleepyi)
-
-Below are concise example invocations tailored to the sleepyhosting.com site for the local path /home/sleepyi4/public_html and the site owner account "sleepyi".
-
-Local filesystem examples (run as site owner):
-
-```bash
-# Full scan with JSON summary and count exit mode (run as sleepyi)
-sudo -u sleepyi bash wp-scan.sh --json --exit-code count /home/sleepyi4/public_html
-
-# Check uploads and uploads-php only and produce a zip archive of flagged files
-sudo -u sleepyi bash wp-scan.sh --only uploads,uploads-php --zip /tmp/sleepyi-scan.zip /home/sleepyi4/public_html
-```
-
-Remote HTTP-only examples (no filesystem access required):
-
-```bash
-# Lightweight remote scan (dry-run) against the public site
-bash wp-scan.sh --url https://sleepyhosting.com --dry-run
-
-# Remote SARIF emission (dry-run recommended first)
-bash wp-scan.sh --url https://sleepyhosting.com --dry-run --sarif /tmp/sleepy-remote.sarif
-```
-
-Interactive menu example:
-
-```bash
-# Start interactive menu for the local site
-bash wp-scan.sh --menu /home/sleepyi4/public_html
-# At the prompt, enter selections like: 1,3,9,21
-```
-
-Combined reporting examples:
-
-```bash
-# Dry-run full scan, emit SARIF and CSV for triage (no archive created)
-sudo -u sleepyi bash wp-scan.sh --dry-run --sarif /tmp/sleepyi.sarif --csv /tmp/sleepyi.csv /home/sleepyi4/public_html
-
-# Live scan with email notification if warnings are found
-sudo -u sleepyi bash wp-scan.sh --email security@sleepyhosting.com /home/sleepyi4/public_html
-```
-
-Notes specific to sleepyhosting examples:
-
-- Use `--dry-run` when testing new flags to avoid creating archives or making changes.
-- Running under the site owner (sudo -u sleepyi) helps ensure file permission visibility when scanning /home/sleepyi4/public_html.
-- The `--url` mode is useful for public sites where filesystem access is not available; it performs lightweight HTTP probes and skips filesystem modules.
-
-
 ## Notes
 
 - `.well-known` and top‑level verification HTML files are detected to help spot unauthorized ownership claims.
-- Excluding IPs from results:
-  - If `excluded-ips.txt` exists next to `wp-scan.sh`, it is used automatically.
-  - You can override with `--exclude-ips-file /path/to/file` or `WP_SCAN_EXCLUDED_IPS_FILE=/path/to/file`.
-  - This only filters what gets printed; it does not skip scanning the log files.
 - Access logs scan:
   - If the scanned site path looks like `/home/<user>/public_html/...`, the script will prefer `/home/<user>/access-logs` and `/home/<user>/logs`.
   - Otherwise it falls back to scanning `/home/*/access-logs` and `/home/*/logs`.
@@ -270,22 +184,12 @@ Notes specific to sleepyhosting examples:
 - Context preview (`--sc`) prints matched lines with their line numbers (no surrounding context).
 - cURL matches are filtered to ignore standard WP core/theme/plugin paths.
 - This scanner can produce false positives; always verify manually.
-- The Summary may show a red `Files to review (high-signal matches; not proof)` section listing paths worth checking first.
 - The WP-CLI module requires the `wp` command to be installed and accessible.
 - The immutable file check requires the `lsattr` command and only works on filesystems that support extended attributes (like ext4).
 
-## Signatures validation
-
-When using `--update-signatures`, downloaded signature feeds are validated locally for common formatting errors. A small validation script (validate-signatures.sh) checks each non-comment line for either a legacy ERE pattern (single value) or the new pipe-separated format:
-
-ruleId|severity|pattern|description
-
-Accepted severity values: info, low, medium, high, critical, warning, error. If validation fails the downloaded file is removed and the update exits with a non-zero status.
-
 ## Changelog
 
-- **2026‑01‑09**: Added ModSecurity log scanning (`--modsec-logs`) and included results in Summary/JSON output.
-- **2026‑01‑09**: Added excluded IP filtering for access-log results (`excluded-ips.txt`, `--exclude-ips-file`, `WP_SCAN_EXCLUDED_IPS_FILE`), added a high-signal “files to review” summary section, and fixed numeric warning-count parsing that could trigger `integer expression expected`.
+- **2026‑07‑28**: Added menu option 40 to mass-scan /home/* for German SEO spam (de_DE.l10n.php). The scan runs in the background and writes detailed findings and remediation instructions to /root/seospamscan.txt.
 - **2026‑01‑02**: Added `--wp-cli` module for deep WordPress-specific checks (core integrity, vulnerabilities, users) and `--immutable` module to detect files with the `+i` attribute. Updated requirements and all documentation.
 - **2026‑01‑01**: Added `dyn-exec` and `oneliner` modules to detect more advanced and unknown PHP shells. Fixed output issues where file lists were not being displayed for several modules. Tagged: `features/advanced-shell-detection-2026-01-01`.
 - **2025‑12‑31**: Added uploads‑PHP, hidden dotfiles, superglobal backdoor scan, JSON summary output, exit‑code control, and fixed verification files search. Tagged: `features/all-suggested-2025-12-31`.
@@ -294,10 +198,13 @@ Accepted severity values: info, low, medium, high, critical, warning, error. If 
 
 GPLv3 (see `LICENSE`).
 
-## Docker
-A Dockerfile has been added to allow running wp-scan in a lightweight container.
-Build: docker build -t wp-scan .
-Run:  docker run --rm wp-scan --help
+## 2026-07-28T22:31:22.275Z - Added plugin-scan module
 
-## CI
-A GitHub Actions workflow (./github/workflows/ci.yml) has been added to run ShellCheck and basic checks on push and pull requests.
+A new "plugin-scan" module was added to wp-scan.sh to help detect vulnerable, hacked, or fake plugins.
+
+Key details:
+- CLI flags: --plugin-scan and --no-plugin-scan
+- Interactive menu entry: "22) Plugin deep scan (plugins directory)"
+- What it does: scans wp-content/plugins for suspicious code patterns (e.g. base64_decode, gzinflate, eval, system, shell_exec), flags plugin directories missing a "Plugin Name:" header (possible fake plugins), and reports recent plugin file modifications.
+
+Run the scanner with `--plugin-scan` or enable it from `--menu` to include plugin checks in the scan report.

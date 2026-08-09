@@ -1,6 +1,7 @@
-chore: commit current workspace changes
+feat: add remote HTTP scan mode, dry-run and verbosity
 
-Files changed:
-README.md status_before.txt wp-scan.sh
+- Implements --url for lightweight remote checks (meta generator, common endpoints)
+- Adds --dry-run and -v/--verbose flags
+- Updates README and CHANGELOG
 
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
