@@ -16,6 +16,7 @@ Generic WordPress and site security scanner (Bash) that surfaces suspicious chan
 - **Immutable files**: detect files with the immutable (`+i`) attribute, a strong indicator of rootkits or persistent backdoors
 - **WP-CLI deep checks**: perform context-aware WordPress checks (if `wp` command is available):
     - **Core integrity**: verify core files against official checksums.
+    - **Plugin checksums**: verify installed plugins against upstream checksums (wp plugin verify-checksums).
     - **Plugin/Theme status**: list inactive plugins/themes and known vulnerabilities.
     - **User security**: list admin users and flag users with no role.
     - **Database status**: report database size and suspicious options.
