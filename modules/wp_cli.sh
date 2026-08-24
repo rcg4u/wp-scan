@@ -67,7 +67,33 @@ scan_wp_cli() {
         vuln_count=$(echo "$vuln_report" | jq length 2>/dev/null || echo 0)
         if [ "$vuln_count" -gt 0 ]; then
             echo "!!! WARNING: Found $vuln_count plugin vulnerabilities:"
-            echo "$vuln_report" | jq -r '.[] | " - \(.title) in \(.plugin) (\(.fixed_in // "no fix"))"' 2>/dev/null || echo "$vuln_report"
+            echo "$vuln_report" | jq -r '.[] | " - \(.title) in \(.plugin) (\(.fixed_in // \"no fix\"))"' 2>/dev/null || echo "$vuln_report"
+        fi
+    else
+        # Fallback: query external vulnerability providers if configured via environment variables
+        if [ -n "${VULN_API_WORDfence_URL:-}" ] || [ -n "${VULN_API_PATCHSTACK_URL:-}" ]; then
+            echo " -> Querying external vulnerability providers..."
+            local plugins_list
+            plugins_list=$(wp $WP_ALLOW_ROOT plugin list --format=json 2>/dev/null)
+            if [ -n "$plugins_list" ] && [ "$plugins_list" != "[]" ]; then
+                for plugin_slug in $(echo "$plugins_list" | jq -r '.[].name'); do
+                    echo "  -> Checking plugin: $plugin_slug"
+                    if [ -n "${VULN_API_WORDfence_URL:-}" ]; then
+                        resp=$(curl -s -H "Authorization: Bearer ${VULN_API_WORDfence_KEY:-}" "${VULN_API_WORDfence_URL}?plugin=${plugin_slug}")
+                        if [ -n "$resp" ]; then
+                            echo "   [wordfence] Response for $plugin_slug:"
+                            echo "$resp" | jq -r '.' 2>/dev/null || echo "$resp"
+                        fi
+                    fi
+                    if [ -n "${VULN_API_PATCHSTACK_URL:-}" ]; then
+                        resp=$(curl -s -H "Authorization: Bearer ${VULN_API_PATCHSTACK_KEY:-}" "${VULN_API_PATCHSTACK_URL}?plugin=${plugin_slug}")
+                        if [ -n "$resp" ]; then
+                            echo "   [patchstack] Response for $plugin_slug:"
+                            echo "$resp" | jq -r '.' 2>/dev/null || echo "$resp"
+                        fi
+                    fi
+                done
+            fi
         fi
     fi
 

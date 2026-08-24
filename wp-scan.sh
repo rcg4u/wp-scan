@@ -538,6 +538,16 @@ fi
 # Check for any verification files (Google, Bing, Yandex, etc.)
 if [ "$DO_VERIFICATION" -eq 1 ]; then
   VERIFICATION_FILES=$( { find "$SITE_PATH" -maxdepth 1 -type f \( -name "google*.html" -o -name "bing*.html" -o -name "yandex*.html" \) 2>/dev/null ; find "$SITE_PATH/.well-known" -type f 2>/dev/null ; } 2>/dev/null )
+  # Known trusted verification files can be listed here to avoid false positives.
+  # Example: google0ebb363c25f399c9.html belongs to Forrest and should not trigger a warning.
+  if [ -n "$VERIFICATION_FILES" ]; then
+    # Detect and remove the trusted Forrest file from the warning list.
+    TRUSTED_ENTRY="${SITE_PATH}/google0ebb363c25f399c9.html"
+    if printf "%s\n" "$VERIFICATION_FILES" | grep -x -F -q "$TRUSTED_ENTRY" 2>/dev/null; then
+      echo "Info: Found verification file 'google0ebb363c25f399c9.html' (owned by Forrest); skipping warning for that file."
+      VERIFICATION_FILES=$(printf "%s\n" "$VERIFICATION_FILES" | grep -v -x -F "$TRUSTED_ENTRY" 2>/dev/null || true)
+    fi
+  fi
   if [ -n "$VERIFICATION_FILES" ]; then
     echo "!!! WARNING: Found verification files. These could be for unauthorized ownership claims:"
     echo "$VERIFICATION_FILES"
@@ -1395,6 +1405,18 @@ if [ "$DO_WP_CLI" -eq 1 ]; then
       fi
 
       # 7.3 User Security Check
+      # Verify plugin checksums for all installed plugins via WP-CLI
+      echo " -> Verifying plugin checksums via WP-CLI..."
+      PLUGIN_LIST=$("${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" plugin list --format=csv --fields=name 2>/dev/null | sed -n '2,$p')
+      if [ -n "$PLUGIN_LIST" ]; then
+        printf "%s\n" "$PLUGIN_LIST" | while IFS= read -r p; do
+          [ -z "$p" ] && continue
+          if ! "${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" plugin verify-checksums "$p" --allow-root >/dev/null 2>&1; then
+            echo "!!! WARNING: Plugin '$p' failed checksum verification (modified or missing)."
+            ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$SITE_PATH/wp-content/plugins/$p")
+          fi
+        done
+      fi
       echo " -> Checking user security..."
       ADMIN_USERS=$("${WP_CLI[@]}" "${WP_CLI_ARGS[@]}" user list --role=administrator --format=json 2>/dev/null)
       if [ -n "$ADMIN_USERS" ] && [ "$ADMIN_USERS" != "[]" ]; then
@@ -1465,6 +1487,28 @@ if [ "$DO_PLUGIN_SCAN" -eq 1 ]; then
     fi
   else
     echo " -> No plugins directory found at $PLUG_DIR"
+  fi
+
+  # New: Verify plugin checksums via WP-CLI (if available and functional)
+  if command -v wp >/dev/null 2>&1; then
+    if (cd "$SITE_PATH" && wp core is-installed --quiet 2>/dev/null); then
+      echo " -> Verifying installed plugins checksums via WP-CLI..."
+      PLUGIN_NAMES=$(cd "$SITE_PATH" && wp plugin list --format=csv --fields=name 2>/dev/null | sed -n '2,$p')
+      if [ -n "$PLUGIN_NAMES" ]; then
+        printf "%s\n" "$PLUGIN_NAMES" | while IFS= read -r p; do
+          [ -z "$p" ] && continue
+          # Run checksum verification for each plugin; non-zero indicates modified or missing files.
+          if ! (cd "$SITE_PATH" && wp plugin verify-checksums "$p" --allow-root >/dev/null 2>&1); then
+            echo "!!! WARNING: Plugin '$p' failed checksum verification (modified or missing)."
+            ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$SITE_PATH/wp-content/plugins/$p")
+          fi
+        done
+      fi
+    else
+      echo " -> WP-CLI present but not functional for this install; skipping plugin checksum verification."
+    fi
+  else
+    echo " -> WP-CLI not found; skipping plugin checksum verification."
   fi
 fi
 
