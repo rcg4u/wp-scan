@@ -12,6 +12,7 @@ scan_uploads_php() {
 
     if [ -n "$uploads_php_files" ]; then
         echo "!!! WARNING: Found PHP files inside uploads (should be media only):"
+        highlight_high "Executable PHP located in uploads is frequently used to hide backdoors and stagers; treat as high risk."
         echo "$uploads_php_files"
         ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$uploads_php_files")
     else

@@ -13,6 +13,7 @@ scan_verification_files() {
 
     if [ -n "$verification_files" ]; then
         echo "!!! WARNING: Found verification files. These could be for unauthorized ownership claims:"
+        highlight_caution "Unexpected verification files (.well-known or top-level provider files) can indicate another party attempted to claim ownership or control of the site; verify their origin before removing."
         echo "$verification_files"
         ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$verification_files")
     else

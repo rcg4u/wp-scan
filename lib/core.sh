@@ -17,7 +17,7 @@ ZIP_CANDIDATES=""
 
 # WordPress mode (default on). Disable with --no-wordpress
 WP_MODE=1
-# Show context toggle (2 lines before/after around matched signatures)
+# Show context toggle (10 lines before/after around matched signatures)
 SHOW_CONTEXT=0
 # Exclude cache from recent file scans
 EXCLUDE_CACHE=1
@@ -42,6 +42,22 @@ DO_RECENT=1; DO_SUSPICIOUS=1; DO_UPLOADS=1; DO_UPLOADS_PHP=1; DO_BACKDOOR=1
 DO_OBFUSCATED=1; DO_PHPSHELL=1; DO_HIDDEN=1; DO_SUPERGLOBAL=1; DO_CURL=1
 DO_WPVER=1; DO_PERMS=1; DO_IMMUTABLE=1; DO_VERIFICATION=1; DO_ACCESS_LOGS=1
 DO_DYN_EXEC=1; DO_ONELINER=1; DO_WP_CLI=1; DO_IMAGE_HEADERS=1
+
+# --- Helper functions shared across modules -
+
+# Print a high-risk (red) label and explanation
+highlight_high() {
+    local msg="$1"
+    # Bold red label
+    printf "\e[1;31m[HIGH RISK]\e[0m %s\n" "$msg"
+}
+
+# Print a caution (yellow) label and explanation
+highlight_caution() {
+    local msg="$1"
+    # Bold yellow label
+    printf "\e[1;33m[CAUTION]\e[0m %s\n" "$msg"
+}
 
 # --- Helper functions shared across modules ---
 
@@ -116,7 +132,7 @@ Options:
   --only <modules>       Run only these modules (csv or space-separated)
   --skip <modules>       Skip these modules (csv or space-separated)
   --no-wordpress         Scan generic site; skip WordPress-specific checks
-  --sc                   Show 2 lines of code context around matched signatures
+  --sc                   Show 10 lines of code context around matched signatures
   --json                 Output a minimal JSON summary at the end
   --exit-code <mode>     Exit code mode: 'binary' (0/1) or 'count' (0-254)
   --zip <filename.zip>   Zip up flagged files into the specified archive

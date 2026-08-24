@@ -17,6 +17,7 @@ scan_malicious_code() {
         matches=$(eval "$grep_base -E \"$pattern\" \"$SITE_PATH\"" 2>/dev/null | grep -v -E "wp-includes/|wp-admin/|wp-content/plugins/|wp-content/themes/" | head -10)
         if [ -n "$matches" ]; then
             echo "!!! WARNING: Found high-risk functions. Review these files:"
+            highlight_high "These files contain high-risk function calls (eval/system/exec/etc.) that may allow remote code execution or shell access. Review immediately."
             echo "$matches"
             ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$matches")
         else
@@ -31,6 +32,7 @@ scan_malicious_code() {
         matches=$(eval "$grep_base -E \"$pattern\" \"$SITE_PATH\"" 2>/dev/null | grep -v -E "wp-includes/|wp-admin/" | head -10)
         if [ -n "$matches" ]; then
             echo "!!! WARNING: Found potentially obfuscated code. Review these files:"
+            highlight_caution "Obfuscated code (base64/gzinflate/etc.) often hides malicious payloads; inspect decoded content before restoring or deleting."
             echo "$matches"
             ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$matches")
         else
@@ -52,6 +54,7 @@ scan_malicious_code() {
 
         if [ -n "$unique" ]; then
             echo "!!! WARNING: Potential PHP shell indicators found. Review these files:"
+            highlight_high "Known web shell signatures detected; these typically allow remote command execution and full site compromise."
             echo "$unique" | head -20
             ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$unique")
         else
@@ -66,6 +69,7 @@ scan_malicious_code() {
         matches=$(eval "$grep_base -E \"$pattern\" \"$SITE_PATH\"" 2>/dev/null | grep -v -E "wp-includes/|wp-admin/" | head -10)
         if [ -n "$matches" ]; then
             echo "!!! WARNING: Found patterns suggesting dynamic function execution. Review these files:"
+            highlight_high "Dynamic function execution enables attackers to build and invoke functions at runtime, often bypassing static detection; treat as high risk."
             echo "$matches"
             ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$matches")
         else
@@ -80,6 +84,7 @@ scan_malicious_code() {
 
         if [ -n "$oneliner_files" ]; then
             echo "!!! WARNING: Found very small PHP files with dangerous functions (potential one-liner shells):"
+            highlight_high "One-line or very small PHP files with exec/eval are commonly tiny webshells that provide immediate remote command execution; investigate immediately."
             local filtered
             filtered=$(printf "%s\n" "$oneliner_files" | grep -v -E "wp-includes/|wp-admin/" | head -10)
             [ -n "$filtered" ] && echo "$filtered" || echo " (Found files were in standard directories, but still worth checking)"

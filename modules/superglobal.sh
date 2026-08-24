@@ -11,6 +11,7 @@ scan_superglobal() {
 
     if [ -n "$matches" ]; then
         echo "!!! WARNING: Superglobal-driven exec/eval patterns found:"
+        highlight_high "Patterns that execute data from \\$_GET/POST/REQUEST/COOKIE were found; this allows attackers to send payloads that the site will execute directly."
         echo "$matches"
         ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$matches")
     else

@@ -28,6 +28,7 @@ scan_wp_cli() {
 
     if [ $? -ne 0 ]; then
         echo "!!! WARNING: WordPress core files have been modified or checksums are missing."
+        highlight_high "Modified or missing core files can indicate compromise or unauthorized changes; restore from a verified backup or reinstall core files."
         echo "$core_status" | jq -r '.[] | "File: \(.file), Status: \(.status)"' 2>/dev/null || echo "$core_status"
     else
         echo "OK: Core file integrity verified."
@@ -38,6 +39,7 @@ scan_wp_cli() {
     plugin_checks=$(wp $WP_ALLOW_ROOT plugin verify-checksums --format=json 2>/dev/null)
     if [ $? -ne 0 ]; then
         echo "!!! WARNING: Plugin checksums verification failed or modifications detected."
+        highlight_high "Modified plugins may contain injected backdoors or malware; examine diffs and consider reinstalling or replacing affected plugins."
         echo "$plugin_checks" | jq -r '.[] | " - \(.file // .) (Status: \(.status // .))"' 2>/dev/null || echo "$plugin_checks"
     else
         echo "OK: Plugin checksums verified."

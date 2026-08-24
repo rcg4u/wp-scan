@@ -29,10 +29,11 @@ scan_image_headers() {
         # Check for PHP tags in header
         if echo "$header" | grep -q -E "$PHP_PATTERN" 2>/dev/null; then
             echo "!!! WARNING: PHP code found in image header: $img"
+            highlight_high "PHP code embedded inside image headers allows execution when the file is served; this is commonly used to hide backdoors in media uploads."
             HACKED_IMAGES=$(printf "%s\n%s\n" "$HACKED_IMAGES" "$img")
             SUSPECT_COUNT=$((SUSPECT_COUNT + 1))
             
-            if [ "$SHOW_CONTEXT" -eq 1 ]; then
+            if [ "$SHOW_CONTEXT" -eq 1 ] || [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_CURL" -eq 1 ] || [ "$DO_UPLOADS_PHP" -eq 1 ] || [ "$DO_HIDDEN" -eq 1 ] || [ "$DO_SUPERGLOBAL" -eq 1 ] || [ "$DO_VERIFICATION" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ] || [ "$DO_SEO_SPAM" -eq 1 ] || [ "$DO_WP_CLI" -eq 1 ] || [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
                 echo " -> First 200 chars of suspicious content:"
                 echo "$header" | head -c 200 | od -c | head -10
             fi
@@ -42,10 +43,11 @@ scan_image_headers() {
         # Check for eval/exec patterns in header
         if echo "$header" | grep -q -E "$EVAL_PATTERN" 2>/dev/null; then
             echo "!!! WARNING: Suspicious eval/exec pattern in image header: $img"
+            highlight_high "Eval/exec-like constructs in an image header are a strong sign of a malicious payload; these files should be quarantined and analyzed."
             HACKED_IMAGES=$(printf "%s\n%s\n" "$HACKED_IMAGES" "$img")
             SUSPECT_COUNT=$((SUSPECT_COUNT + 1))
             
-            if [ "$SHOW_CONTEXT" -eq 1 ]; then
+            if [ "$SHOW_CONTEXT" -eq 1 ] || [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_CURL" -eq 1 ] || [ "$DO_UPLOADS_PHP" -eq 1 ] || [ "$DO_HIDDEN" -eq 1 ] || [ "$DO_SUPERGLOBAL" -eq 1 ] || [ "$DO_VERIFICATION" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ] || [ "$DO_SEO_SPAM" -eq 1 ] || [ "$DO_WP_CLI" -eq 1 ] || [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
                 echo " -> Matched pattern:"
                 echo "$header" | grep -o -E ".{0,50}($EVAL_PATTERN).{0,50}" | head -3
             fi
@@ -55,6 +57,7 @@ scan_image_headers() {
         # Check for stealth/obfuscation patterns
         if echo "$header" | grep -q -E "$STEALTH_PATTERN" 2>/dev/null; then
             echo "!!! WARNING: Stealth/obfuscation pattern in image header: $img"
+            highlight_caution "Stealth or obfuscation markers may indicate a payload is hidden or attempts to avoid detection; review the file closely."
             HACKED_IMAGES=$(printf "%s\n%s\n" "$HACKED_IMAGES" "$img")
             SUSPECT_COUNT=$((SUSPECT_COUNT + 1))
             continue

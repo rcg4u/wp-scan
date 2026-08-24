@@ -14,7 +14,7 @@
 #   --only <modules>        Run only these modules (csv or space-separated)
 #   --skip <modules>        Skip these modules (csv or space-separated)
 #   --no-wordpress          Scan generic site; skip WordPress-specific checks
-#   --sc                    Show 2 lines of code context around matched signatures
+#   --sc                    Show 10 lines of code context around matched signatures
 #   --json                  Output a minimal JSON summary at the end
 #   --exit-code <mode>      Exit code mode: 'binary' (0/1) or 'count' (0-254)
 #   --zip <filename.zip>    Zip up flagged files into the specified archive
@@ -66,7 +66,7 @@ EXCLUDED_IPS_PATTERNS_FILE=""
 # WordPress mode (default on). Disable with --no-wordpress
 WP_MODE=1
 
-# Show context toggle (2 lines before/after around matched signatures)
+# Show context toggle (10 lines before/after around matched signatures)
 SHOW_CONTEXT=0
 JSON_OUTPUT=0
 EXIT_CODE_MODE="binary"
@@ -896,12 +896,12 @@ if [ "$DO_BACKDOOR" -eq 1 ]; then
     FILTERED_BACKDOOR=$(printf "%s\n" "$BACKDOOR_MATCH" | grep -v -E "wp-includes/|wp-admin/|wp-content/plugins/|wp-content/themes/" | head -10)
     echo "$FILTERED_BACKDOOR"
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_BACKDOOR")
-    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+    if [ "$SHOW_CONTEXT" -eq 1 ] || [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_CURL" -eq 1 ] || [ "$DO_UPLOADS_PHP" -eq 1 ] || [ "$DO_HIDDEN" -eq 1 ] || [ "$DO_SUPERGLOBAL" -eq 1 ] || [ "$DO_VERIFICATION" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ] || [ "$DO_SEO_SPAM" -eq 1 ] || [ "$DO_WP_CLI" -eq 1 ] || [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
       echo " -> Showing matched lines with line numbers (first 3 matches per file):"
       printf "%s\n" "$FILTERED_BACKDOOR" | while IFS= read -r f; do
         [ -z "$f" ] && continue
         echo "----- $f -----"
-        grep -n -I -E "$BACKDOOR_PATTERN" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+        GREP_COLORS='mt=1;31' grep --color=always -n -I -C 10 -E "$BACKDOOR_PATTERN" "$f" 2>/dev/null || echo "(no signature lines found)"
       done
     fi
   else
@@ -920,12 +920,12 @@ if [ "$DO_OBFUSCATED" -eq 1 ]; then
     FILTERED_OBFUSCATED=$(printf "%s\n" "$OBFUSCATED_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -10)
     echo "$FILTERED_OBFUSCATED"
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_OBFUSCATED")
-    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+    if [ "$SHOW_CONTEXT" -eq 1 ] || [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_CURL" -eq 1 ] || [ "$DO_UPLOADS_PHP" -eq 1 ] || [ "$DO_HIDDEN" -eq 1 ] || [ "$DO_SUPERGLOBAL" -eq 1 ] || [ "$DO_VERIFICATION" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ] || [ "$DO_SEO_SPAM" -eq 1 ] || [ "$DO_WP_CLI" -eq 1 ] || [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
       echo " -> Showing matched lines with line numbers (first 3 matches per file):"
       printf "%s\n" "$FILTERED_OBFUSCATED" | while IFS= read -r f; do
         [ -z "$f" ] && continue
         echo "----- $f -----"
-        grep -n -I -E "$OBFUSCATED_PATTERN" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+        GREP_COLORS='mt=1;33' grep --color=always -n -I -C 10 -E "$OBFUSCATED_PATTERN" "$f" 2>/dev/null || echo "(no signature lines found)"
       done
     fi
   else
@@ -947,13 +947,13 @@ if [ "$DO_PHPSHELL" -eq 1 ]; then
     PHPSHELL_UNIQUE=$( { printf "%s\n" "$PHPSHELL_MATCH"; printf "%s\n" "$PHPSHELL_NAMES"; } | grep -v -E "wp-includes/|wp-admin/" | sort -u )
     echo "$PHPSHELL_UNIQUE" | head -20
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$PHPSHELL_UNIQUE")
-    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+    if [ "$SHOW_CONTEXT" -eq 1 ] || [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_CURL" -eq 1 ] || [ "$DO_UPLOADS_PHP" -eq 1 ] || [ "$DO_HIDDEN" -eq 1 ] || [ "$DO_SUPERGLOBAL" -eq 1 ] || [ "$DO_VERIFICATION" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ] || [ "$DO_SEO_SPAM" -eq 1 ] || [ "$DO_WP_CLI" -eq 1 ] || [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
       echo " -> Showing matched lines with line numbers (first 3 matches per file):"
       printf "%s\n" "$PHPSHELL_UNIQUE" | head -20 | while IFS= read -r f; do
         [ -z "$f" ] && continue
         echo "----- $f -----"
         if grep -q -I -E "$PHPSHELL_SIG_PATTERN" "$f" 2>/dev/null; then
-          grep -n -I -E "$PHPSHELL_SIG_PATTERN" -m 3 "$f" 2>/dev/null
+          GREP_COLORS='mt=1;31' grep --color=always -n -I -C 10 -E "$PHPSHELL_SIG_PATTERN" "$f" 2>/dev/null
         else
           echo "(flagged by filename; no signature lines found)"
         fi
@@ -984,12 +984,12 @@ if [ "$DO_PHPSHELL" -eq 1 ]; then
     FILTERED_DECODE_EXEC=$(printf "%s\n" "$DECODE_EXEC_FILES" | grep -v -E "wp-includes/|wp-admin/" | head -20)
     echo "$FILTERED_DECODE_EXEC"
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_DECODE_EXEC")
-    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+    if [ "$SHOW_CONTEXT" -eq 1 ] || [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_CURL" -eq 1 ] || [ "$DO_UPLOADS_PHP" -eq 1 ] || [ "$DO_HIDDEN" -eq 1 ] || [ "$DO_SUPERGLOBAL" -eq 1 ] || [ "$DO_VERIFICATION" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ] || [ "$DO_SEO_SPAM" -eq 1 ] || [ "$DO_WP_CLI" -eq 1 ] || [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
       echo " -> Showing matched lines (decoder/exec), first 3 per file:"
       printf "%s\n" "$FILTERED_DECODE_EXEC" | while IFS= read -r f; do
         [ -z "$f" ] && continue
         echo "----- $f -----"
-        grep -n -I -E "($DECODER_PATTERN|$EXEC_PATTERN)" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+        GREP_COLORS='mt=1;31' grep --color=always -n -I -C 10 -E "($DECODER_PATTERN|$EXEC_PATTERN)" "$f" 2>/dev/null || echo "(no signature lines found)"
       done
     fi
   else
@@ -1004,12 +1004,12 @@ if [ "$DO_PHPSHELL" -eq 1 ]; then
     FILTERED_WRAPPER=$(printf "%s\n" "$WRAPPER_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -20)
     echo "$FILTERED_WRAPPER"
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_WRAPPER")
-    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+    if [ "$SHOW_CONTEXT" -eq 1 ] || [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_CURL" -eq 1 ] || [ "$DO_UPLOADS_PHP" -eq 1 ] || [ "$DO_HIDDEN" -eq 1 ] || [ "$DO_SUPERGLOBAL" -eq 1 ] || [ "$DO_VERIFICATION" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ] || [ "$DO_SEO_SPAM" -eq 1 ] || [ "$DO_WP_CLI" -eq 1 ] || [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
       echo " -> Showing matched lines with line numbers (first 3 matches per file):"
       printf "%s\n" "$FILTERED_WRAPPER" | while IFS= read -r f; do
         [ -z "$f" ] && continue
         echo "----- $f -----"
-        grep -n -I -E "$WRAPPER_PATTERN" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+        GREP_COLORS='mt=1;33' grep --color=always -n -I -C 10 -E "$WRAPPER_PATTERN" "$f" 2>/dev/null || echo "(no signature lines found)"
       done
     fi
   else
@@ -1024,12 +1024,12 @@ if [ "$DO_PHPSHELL" -eq 1 ]; then
     FILTERED_STEALTH=$(printf "%s\n" "$STEALTH_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -20)
     echo "$FILTERED_STEALTH"
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_STEALTH")
-    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+    if [ "$SHOW_CONTEXT" -eq 1 ] || [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_CURL" -eq 1 ] || [ "$DO_UPLOADS_PHP" -eq 1 ] || [ "$DO_HIDDEN" -eq 1 ] || [ "$DO_SUPERGLOBAL" -eq 1 ] || [ "$DO_VERIFICATION" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ] || [ "$DO_SEO_SPAM" -eq 1 ] || [ "$DO_WP_CLI" -eq 1 ] || [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
       echo " -> Showing matched lines with line numbers (first 3 matches per file):"
       printf "%s\n" "$FILTERED_STEALTH" | while IFS= read -r f; do
         [ -z "$f" ] && continue
         echo "----- $f -----"
-        grep -n -I -E "$STEALTH_PATTERN" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+        GREP_COLORS='mt=1;33' grep --color=always -n -I -C 10 -E "$STEALTH_PATTERN" "$f" 2>/dev/null || echo "(no signature lines found)"
       done
     fi
   else
@@ -1055,12 +1055,12 @@ if [ "$DO_PHPSHELL" -eq 1 ]; then
     FILTERED_VARFUNC=$(printf "%s\n" "$VARFUNC_SUSP" | grep -v -E "wp-includes/|wp-admin/" | head -20)
     echo "$FILTERED_VARFUNC"
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_VARFUNC")
-    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+    if [ "$SHOW_CONTEXT" -eq 1 ] || [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_CURL" -eq 1 ] || [ "$DO_UPLOADS_PHP" -eq 1 ] || [ "$DO_HIDDEN" -eq 1 ] || [ "$DO_SUPERGLOBAL" -eq 1 ] || [ "$DO_VERIFICATION" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ] || [ "$DO_SEO_SPAM" -eq 1 ] || [ "$DO_WP_CLI" -eq 1 ] || [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
       echo " -> Showing matched lines with line numbers (first 3 matches per file):"
       printf "%s\n" "$FILTERED_VARFUNC" | while IFS= read -r f; do
         [ -z "$f" ] && continue
         echo "----- $f -----"
-        grep -n -I -E "($VARFUNC_PATTERN|$SUPERGLOBAL_ANY)" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+        GREP_COLORS='mt=1;31' grep --color=always -n -I -C 10 -E "($VARFUNC_PATTERN|$SUPERGLOBAL_ANY)" "$f" 2>/dev/null || echo "(no signature lines found)"
       done
     fi
   else
@@ -1085,12 +1085,12 @@ if [ "$DO_PHPSHELL" -eq 1 ]; then
     FILTERED_ENTROPY=$(printf "%s\n" "$ENTROPY_FILES" | grep -v -E "wp-includes/|wp-admin/" | head -20)
     echo "$FILTERED_ENTROPY"
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_ENTROPY")
-    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+    if [ "$SHOW_CONTEXT" -eq 1 ] || [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_CURL" -eq 1 ] || [ "$DO_UPLOADS_PHP" -eq 1 ] || [ "$DO_HIDDEN" -eq 1 ] || [ "$DO_SUPERGLOBAL" -eq 1 ] || [ "$DO_VERIFICATION" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ] || [ "$DO_SEO_SPAM" -eq 1 ] || [ "$DO_WP_CLI" -eq 1 ] || [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
       echo " -> Showing matched lines with line numbers (first 3 matches per file):"
       printf "%s\n" "$FILTERED_ENTROPY" | while IFS= read -r f; do
         [ -z "$f" ] && continue
         echo "----- $f -----"
-        grep -n -I -E "$ENTROPY_PATTERN" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+        GREP_COLORS='mt=1;33' grep --color=always -n -I -C 10 -E "$ENTROPY_PATTERN" "$f" 2>/dev/null || echo "(no signature lines found)"
       done
     fi
   else
@@ -1109,12 +1109,12 @@ if [ "$DO_DYN_EXEC" -eq 1 ]; then
     FILTERED_DYN_EXEC=$(printf "%s\n" "$DYN_EXEC_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -10)
     echo "$FILTERED_DYN_EXEC"
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_DYN_EXEC")
-    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+    if [ "$SHOW_CONTEXT" -eq 1 ] || [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_CURL" -eq 1 ] || [ "$DO_UPLOADS_PHP" -eq 1 ] || [ "$DO_HIDDEN" -eq 1 ] || [ "$DO_SUPERGLOBAL" -eq 1 ] || [ "$DO_VERIFICATION" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ] || [ "$DO_SEO_SPAM" -eq 1 ] || [ "$DO_WP_CLI" -eq 1 ] || [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
       echo " -> Showing matched lines with line numbers (first 3 matches per file):"
       printf "%s\n" "$FILTERED_DYN_EXEC" | while IFS= read -r f; do
         [ -z "$f" ] && continue
         echo "----- $f -----"
-        grep -n -I -E "$DYN_EXEC_PATTERN" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+        GREP_COLORS='mt=1;31' grep --color=always -n -I -C 10 -E "$DYN_EXEC_PATTERN" "$f" 2>/dev/null || echo "(no signature lines found)"
       done
     fi
   else
@@ -1172,12 +1172,12 @@ if [ "$DO_SUPERGLOBAL" -eq 1 ]; then
     FILTERED_SUPER=$(printf "%s\n" "$SUPER_MATCH" | grep -v -E "wp-includes/|wp-admin/" | head -20)
     echo "$FILTERED_SUPER"
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$FILTERED_SUPER")
-    if [ "$SHOW_CONTEXT" -eq 1 ]; then
+    if [ "$SHOW_CONTEXT" -eq 1 ] || [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_CURL" -eq 1 ] || [ "$DO_UPLOADS_PHP" -eq 1 ] || [ "$DO_HIDDEN" -eq 1 ] || [ "$DO_SUPERGLOBAL" -eq 1 ] || [ "$DO_VERIFICATION" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ] || [ "$DO_SEO_SPAM" -eq 1 ] || [ "$DO_WP_CLI" -eq 1 ] || [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
       echo " -> Showing matched lines with line numbers (first 3 matches per file):"
       printf "%s\n" "$FILTERED_SUPER" | while IFS= read -r f; do
         [ -z "$f" ] && continue
         echo "----- $f -----"
-        grep -n -I -E "$SUPER_PATTERN" -m 3 "$f" 2>/dev/null || echo "(no signature lines found)"
+        GREP_COLORS='mt=1;31' grep --color=always -n -I -C 10 -E "$SUPER_PATTERN" "$f" 2>/dev/null || echo "(no signature lines found)"
       done
     fi
   else
@@ -1276,10 +1276,11 @@ if [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
     # Check for PHP tags in header
     if echo "$header" | grep -q -E "$PHP_PATTERN" 2>/dev/null; then
       echo "!!! WARNING: PHP code found in image header: $img"
+      highlight_high "PHP code embedded inside image headers allows execution when served and often indicates backdoors in media uploads."
       HACKED_IMAGES=$(printf "%s\n%s\n" "$HACKED_IMAGES" "$img")
       SUSPECT_COUNT=$((SUSPECT_COUNT + 1))
       
-      if [ "$SHOW_CONTEXT" -eq 1 ]; then
+      if [ "$SHOW_CONTEXT" -eq 1 ] || [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_CURL" -eq 1 ] || [ "$DO_UPLOADS_PHP" -eq 1 ] || [ "$DO_HIDDEN" -eq 1 ] || [ "$DO_SUPERGLOBAL" -eq 1 ] || [ "$DO_VERIFICATION" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ] || [ "$DO_SEO_SPAM" -eq 1 ] || [ "$DO_WP_CLI" -eq 1 ] || [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
         echo " -> First 200 chars of suspicious content:"
         echo "$header" | head -c 200 | od -c | head -10
       fi
@@ -1289,10 +1290,11 @@ if [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
     # Check for eval/exec patterns in header
     if echo "$header" | grep -q -E "$EVAL_PATTERN" 2>/dev/null; then
       echo "!!! WARNING: Suspicious eval/exec pattern in image header: $img"
+      highlight_high "Eval/exec-like constructs in an image header strongly indicate malicious payloads; quarantine these files."
       HACKED_IMAGES=$(printf "%s\n%s\n" "$HACKED_IMAGES" "$img")
       SUSPECT_COUNT=$((SUSPECT_COUNT + 1))
       
-      if [ "$SHOW_CONTEXT" -eq 1 ]; then
+      if [ "$SHOW_CONTEXT" -eq 1 ] || [ "$DO_BACKDOOR" -eq 1 ] || [ "$DO_OBFUSCATED" -eq 1 ] || [ "$DO_CURL" -eq 1 ] || [ "$DO_UPLOADS_PHP" -eq 1 ] || [ "$DO_HIDDEN" -eq 1 ] || [ "$DO_SUPERGLOBAL" -eq 1 ] || [ "$DO_VERIFICATION" -eq 1 ] || [ "$DO_DYN_EXEC" -eq 1 ] || [ "$DO_ONELINER" -eq 1 ] || [ "$DO_SEO_SPAM" -eq 1 ] || [ "$DO_WP_CLI" -eq 1 ] || [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
         echo " -> Matched pattern:"
         echo "$header" | grep -o -E ".{0,50}($EVAL_PATTERN).{0,50}" | head -3
       fi
@@ -1302,6 +1304,7 @@ if [ "$DO_IMAGE_HEADERS" -eq 1 ]; then
     # Check for stealth/obfuscation patterns
     if echo "$header" | grep -q -E "$STEALTH_PATTERN" 2>/dev/null; then
       echo "!!! WARNING: Stealth/obfuscation pattern in image header: $img"
+      highlight_caution "Stealth/obfuscation markers may hide payloads or attempt to avoid detection; inspect carefully."
       HACKED_IMAGES=$(printf "%s\n%s\n" "$HACKED_IMAGES" "$img")
       SUSPECT_COUNT=$((SUSPECT_COUNT + 1))
       continue
@@ -1519,6 +1522,7 @@ if [ "$DO_SEO_SPAM" -eq 1 ]; then
   SEO_SPAM_FILES=$(find "$SITE_PATH/wp-content/languages" -name "*de_DE.l10n.php" -mtime -60 2>/dev/null)
   if [ -n "$SEO_SPAM_FILES" ]; then
     echo "!!! WARNING: Confirmed SEO Spam Factory files found (German Language Hijack):"
+    highlight_caution "SEO spam files inject unwanted links/content into translations which harms SEO and indicates unauthorized modifications; remove and restore official translations."
     echo "$SEO_SPAM_FILES"
     ZIP_CANDIDATES=$(printf "%s\n%s" "$ZIP_CANDIDATES" "$SEO_SPAM_FILES")
 

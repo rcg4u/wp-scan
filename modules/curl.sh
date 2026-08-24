@@ -9,6 +9,7 @@ scan_curl() {
 
     if [ -n "$matches" ]; then
         echo "!!! WARNING: Found cURL calls. These are common in backdoors. Review these files:"
+        highlight_caution "Outbound cURL requests can exfiltrate data or fetch malicious payloads; inspect the remote endpoints and context of usage."
         echo "$matches"
         ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$matches")
     else
