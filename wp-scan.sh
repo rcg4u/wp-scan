@@ -134,6 +134,7 @@ set_module_flag() {
     suspicious) DO_SUSPICIOUS=1 ;;
     uploads) DO_UPLOADS=1 ;;
 	    seo-spam) DO_SEO_SPAM=1 ;;
+     common-backdoors) DO_COMMON_BACKDOORS=1 ;;
     shadow-admin) DO_SHADOW_ADMIN=1 ;;
 
     backdoor) DO_BACKDOOR=1 ;;
@@ -175,6 +176,7 @@ clear_module_flag() {
     image-headers) DO_IMAGE_HEADERS=0 ;;
     plugin-scan) DO_PLUGIN_SCAN=0 ;;
     seo-spam) DO_SEO_SPAM=0 ;;
+    common-backdoors) DO_COMMON_BACKDOORS=0 ;;
     all)
       DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_ACCESS_LOGS=0; DO_MODSEC_LOGS=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0; DO_IMAGE_HEADERS=0; DO_PLUGIN_SCAN=0
       ;;
@@ -218,6 +220,8 @@ while [ $# -gt 0 ]; do
     --uploads) enter_only_mode_if_needed; set_module_flag uploads; shift ;;
     --no-uploads) clear_module_flag uploads; shift ;;
     --backdoor) enter_only_mode_if_needed; set_module_flag backdoor; shift ;;
+     --scan-common-backdoors) enter_only_mode_if_needed; set_module_flag common-backdoors; shift ;;
+     --no-scan-common-backdoors) clear_module_flag common-backdoors; shift ;;
     --no-backdoor) clear_module_flag backdoor; shift ;;
     --obfuscation) enter_only_mode_if_needed; set_module_flag obfuscation; shift ;;
     --no-obfuscation) clear_module_flag obfuscation; shift ;;
@@ -410,7 +414,8 @@ if [ "$MENU_MODE" -eq 1 ]; then
   echo "16) Potential one-liner shells                    (--oneliner)"
     echo "20) SEO Spam 'Link Factory' (German Hijack)       (--seo-spam)"
   echo "21) Database Shadow Admin Audit                  (--shadow-admin)"
-  echo "22) Plugin deep scan (plugins directory)          (--plugin-scan)"
+  echo "22) Plugin deep scan (plugins directory)          (--plugin-scan)
+23) Scan for common backdoors/shell exploits       (--scan-common-backdoors)"
   echo "40) Mass-scan /home/* for SEO Spam (de_DE.l10n.php)  (--seo-spam-mass)"
 
   echo "17) WP-CLI deep checks                            (--wp-cli)"
@@ -433,6 +438,7 @@ if [ "$MENU_MODE" -eq 1 ]; then
 		        20) DO_SEO_SPAM=1 ;;
         21) DO_SHADOW_ADMIN=1 ;;
         22) DO_PLUGIN_SCAN=1 ;;
+         23) DO_COMMON_BACKDOORS=1 ;;
         40) DO_SEO_SPAM_MASS=1 ;;
 
         9) DO_UPLOADS_PHP=1 ;;
@@ -1303,7 +1309,25 @@ if [ "$DO_ONELINER" -eq 1 ]; then
     fi
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$ONELINER_FILES")
   else
-    echo "OK: No suspicious one-liner PHP files found."
+    echo "OK: No suspicious one-liner PHP files found.
+fi
+
+# --- New: Common backdoor/name/signature scan ---
+if [ "${DO_COMMON_BACKDOORS:-0}" -eq 1 ]; then
+  echo -e "\n[+] Scanning for common backdoors and shell exploits (filenames & signatures)..."
+  SIG_FILE="$SCRIPT_DIR/lib/common_backdoors.txt"
+  CB_HITS=""
+  if [ -f "$SIG_FILE" ]; then
+    CB_HITS=$(grep -R -l -I --include="*.php" -f "$SIG_FILE" "$SITE_PATH" 2>/dev/null || true)
+  fi
+  if [ -n "$CB_HITS" ]; then
+    echo "!!! WARNING: Common backdoor signatures matched (review these files):"
+    echo "$CB_HITS" | head -50
+    ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$CB_HITS")
+  else
+    echo "OK: No common backdoor signatures found."
+  fi
+fi"
   fi
 fi
 
@@ -1767,7 +1791,7 @@ echo "Scan Complete."
 echo "=========================================================================="
 
 # Write per-module reports only for modules that were actually run
-MODULES=(recent suspicious uploads uploads-php backdoor obfuscation phpshell hidden superglobal curl wpver perms immutable verification access-logs modsec-logs dyn-exec oneliner wp-cli image-headers plugin-scan seo-spam suspicious-ips seospam mass-scan)
+MODULES=(recent suspicious uploads uploads-php backdoor obfuscation phpshell hidden superglobal curl wpver perms immutable verification access-logs modsec-logs dyn-exec oneliner wp-cli image-headers plugin-scan common-backdoors seo-spam suspicious-ips seospam mass-scan)
 for m in "${MODULES[@]}"; do
   should_save=0
   case "$m" in
@@ -1826,6 +1850,7 @@ for m in "${MODULES[@]}"; do
       seo-spam) BODY="SEO spam files:\n${SEO_SPAM_FILES:-(none)}" ;;
       suspicious-ips) BODY="Suspicious IPs:\n$(printf '%s\n' "${SUSPICIOUS_IPS:-(none)}")" ;;
       seospam) BODY="SEO spam module run." ;;
+    common-backdoors) BODY="Common backdoor hits:\n${CB_HITS:-(none)}" ;;
       mass-scan) BODY="SEO spam mass scan output saved to /root/seospamscan.txt if run." ;;
       *) BODY="Module $m ran; see log: $LOG_FILE" ;;
     esac
