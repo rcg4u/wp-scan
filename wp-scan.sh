@@ -1309,8 +1309,8 @@ if [ "$DO_ONELINER" -eq 1 ]; then
     fi
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$ONELINER_FILES")
   else
-    echo "OK: No suspicious one-liner PHP files found.
-fi
+    echo "OK: No suspicious one-liner PHP files found."
+  fi
 
 # --- New: Common backdoor/name/signature scan ---
 if [ "${DO_COMMON_BACKDOORS:-0}" -eq 1 ]; then
@@ -1326,8 +1326,6 @@ if [ "${DO_COMMON_BACKDOORS:-0}" -eq 1 ]; then
     ZIP_CANDIDATES=$(printf "%s\n%s\n" "$ZIP_CANDIDATES" "$CB_HITS")
   else
     echo "OK: No common backdoor signatures found."
-  fi
-fi"
   fi
 fi
 
