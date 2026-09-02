@@ -41,9 +41,10 @@
 #   --oneliner / --no-oneliner
 #   --wp-cli / --no-wp-cli
 #   --image-headers / --no-image-headers
+#   --seo-spam / --no-seo-spam
 #   --help                  Show usage
 #
-# Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, hidden, superglobal, curl, wpver, perms, verification, access-logs, modsec-logs, dyn-exec, oneliner, wp-cli, plugin-scan, immutable, image-headers, all
+# Modules: recent, suspicious, uploads, uploads-php, backdoor, obfuscation, phpshell, hidden, superglobal, curl, wpver, perms, verification, access-logs, modsec-logs, dyn-exec, oneliner, wp-cli, plugin-scan, immutable, image-headers, seo-spam, all
 # Example: ./wp-scan.sh --only recent,uploads --email admin@example.com /var/www/html/site
 # ====================================================================
 
@@ -173,6 +174,7 @@ clear_module_flag() {
     wp-cli) DO_WP_CLI=0 ;;
     image-headers) DO_IMAGE_HEADERS=0 ;;
     plugin-scan) DO_PLUGIN_SCAN=0 ;;
+    seo-spam) DO_SEO_SPAM=0 ;;
     all)
       DO_RECENT=0; DO_SUSPICIOUS=0; DO_UPLOADS=0; DO_UPLOADS_PHP=0; DO_BACKDOOR=0; DO_OBFUSCATED=0; DO_PHPSHELL=0; DO_HIDDEN=0; DO_SUPERGLOBAL=0; DO_CURL=0; DO_WPVER=0; DO_PERMS=0; DO_IMMUTABLE=0; DO_VERIFICATION=0; DO_ACCESS_LOGS=0; DO_MODSEC_LOGS=0; DO_DYN_EXEC=0; DO_ONELINER=0; DO_WP_CLI=0; DO_IMAGE_HEADERS=0; DO_PLUGIN_SCAN=0
       ;;
@@ -253,6 +255,8 @@ while [ $# -gt 0 ]; do
     --no-image-headers) clear_module_flag image-headers; shift ;;
     --verify-core) DO_VERIFY_CORE=1; shift ;;
     --restore-core) DO_RESTORE_CORE=1; shift ;;
+    --seo-spam) enter_only_mode_if_needed; set_module_flag seo-spam; shift ;;
+    --no-seo-spam) clear_module_flag seo-spam; shift ;;
     --seo-spam-mass) DO_SEO_SPAM_MASS=1; shift ;;
 	
     -h|--help)
@@ -288,6 +292,26 @@ fi
 
 # Assign the site argument to a variable and sanitize it.
 SITE_PATH=$(realpath "$ARG_SITE")
+
+# Reporting: default timestamp (can be overridden by env var CURRENT_DATETIME)
+REPORT_TS="${CURRENT_DATETIME:-$(date -u +%Y%m%dT%H%M%SZ)}"
+# Determine account name for report paths (prefer /home/<user>/public_html pattern)
+if [[ "$SITE_PATH" =~ ^/home/([^/]+)/public_html(/|$) ]]; then
+  REPORT_ACCOUNT="${BASH_REMATCH[1]}"
+else
+  REPORT_ACCOUNT="$(basename "$SITE_PATH" | tr '/ ' '_')"
+fi
+
+# Helper to save module reports under /root/reports/<account>/<type>/<timestamp>.txt
+save_report() {
+  local mod="$1"
+  local body="$2"
+  local dir="/root/reports/${REPORT_ACCOUNT}/${mod}"
+  mkdir -p "$dir" 2>/dev/null || true
+  local file="$dir/${REPORT_TS}.txt"
+  printf "%s\n\n%s\n" "$(date -u +'%Y-%m-%dT%H:%M:%SZ') - Report for module '$mod' on site: $SITE_PATH" "$body" > "$file"
+}
+
 
 # Check if the provided path actually exists and is a directory.
 if [ ! -d "$SITE_PATH" ]; then
@@ -660,6 +684,17 @@ if [ "$DO_ACCESS_LOGS" -eq 1 ]; then
     fi
   }
 
+  # Also include common nginx access logs for system-wide corroboration
+  for nl in /var/log/nginx/access.log /var/log/nginx/access.log.1; do
+    if [ -f "$nl" ]; then
+      if [[ "$nl" =~ \.gz$ ]]; then
+        scan_gz_access_log "$nl"
+      else
+        scan_plain_access_log "$nl"
+      fi
+    fi
+  done
+
   if [ -d "/home" ]; then
     if [ -n "$ACCESS_LOG_USER" ]; then
       ACCESS_LOG_BASE="/home/$ACCESS_LOG_USER"
@@ -715,6 +750,9 @@ if [ "$DO_ACCESS_LOGS" -eq 1 ]; then
   if [ -n "$ACCESS_LOG_FINDINGS" ]; then
     echo "!!! WARNING: Suspicious access log requests found (showing first hits per file):"
     echo "$ACCESS_LOG_FINDINGS" | head -200
+
+    # Save access-logs report
+    save_report "access-logs" "Flagged files: $(printf "%s\n" "$ACCESS_LOG_FILES" | sed '/^\s*$/d' | sort -u)\n\nSummary: Status buckets (matched lines): 2xx=$ACCESS_LOG_STATUS_2XX  3xx=$ACCESS_LOG_STATUS_3XX  4xx=$ACCESS_LOG_STATUS_4XX  5xx=$ACCESS_LOG_STATUS_5XX  unknown=$ACCESS_LOG_STATUS_0\n\nFindings:\n$ACCESS_LOG_FINDINGS"
 
     # Quick summary: surface the most frequent indicators across all hits
     echo " -> Access log quick summary (top indicators):"
@@ -838,20 +876,10 @@ if [ "$DO_MODSEC_LOGS" -eq 1 ]; then
   }
 
   # Candidate locations (kept conservative to avoid huge scans)
-  for d in /var/log/apache2 /var/log/httpd /var/log/nginx /var/log/modsecurity /usr/local/apache/logs /var/log; do
-    [ -d "$d" ] || continue
-    while IFS= read -r lf; do
-      [ -z "$lf" ] && continue
-      case "$lf" in
-        *.gz) scan_gz_modsec_log "$lf" ;;
-        *) scan_plain_modsec_log "$lf" ;;
-      esac
-    done < <(
-      find "$d" -maxdepth 2 -type f \
-        \( -iname "*modsec*" -o -iname "*modsecurity*" -o -iname "modsec_audit.log*" -o -iname "modsecurity_audit.log*" \) \
-        2>/dev/null | head -200
-    )
-  done
+  # Only scan the primary Apache ModSecurity audit log as requested
+  if [ -f /var/log/apache2/modsec_audit.log ]; then
+    scan_plain_modsec_log /var/log/apache2/modsec_audit.log
+  fi
 
   MODSEC_LOG_FILES=$(printf "%s\n" "$MODSEC_LOG_FILES" | sed '/^\s*$/d' | sort -u)
 
@@ -859,8 +887,141 @@ if [ "$DO_MODSEC_LOGS" -eq 1 ]; then
     echo "!!! WARNING: ModSecurity log entries found (showing first hits per file):"
     echo "$MODSEC_LOG_FINDINGS" | head -200
 
+    # Save modsec-logs report
+    save_report "modsec-logs" "Flagged files: $(printf "%s\n" "$MODSEC_LOG_FILES" | sed '/^\s*$/d' | sort -u)\n\nTop client IPs:\n$(printf "%s\n" "$MODSEC_MATCHED_LINES" | sed -n -E 's/.*\[client ([0-9.]+)\].*/\1/p' | sed '/^\s*$/d' | sort | uniq -c | sort -nr | head -10)\n\nTop URIs:\n$(printf "%s\n" "$MODSEC_MATCHED_LINES" | sed -n -E 's/.*\[uri \"([^\"]+)\"\].*/\1/p' | sed '/^\s*$/d' | sort | uniq -c | sort -nr | head -10)\n\nFindings:\n$MODSEC_LOG_FINDINGS"
+
     echo " -> ModSecurity quick summary:"
+    echo "    Scan timestamp: $(date -u +\"%Y-%m-%dT%H:%M:%SZ\")"
+    echo "    Matches per file:"
+    printf "%s\n" "$MODSEC_LOG_FINDINGS" | grep "^=== " | sed -E 's/^=== (.*) ===/\1/' | sort | uniq -c | sort -nr | head -10 | sed 's/^/      /'
+    echo "    Top client IPs:"
+    printf "%s\n" "$MODSEC_MATCHED_LINES" | sed -n -E 's/.*\[client ([0-9.]+)\].*/\1/p' | sed '/^\s*$/d' | sort | uniq -c | sort -nr | head -10 | sed 's/^/      /'
+    echo "    Top requested URIs:"
+    printf "%s\n" "$MODSEC_MATCHED_LINES" | sed -n -E 's/.*\[uri \"([^\"]+)\"\].*/\1/p' | sed '/^\s*$/d' | sort | uniq -c | sort -nr | head -10 | sed 's/^/      /'
     echo "    Flagged log files: $(printf "%s\n" "$MODSEC_LOG_FILES" | sed '/^\s*$/d' | wc -l | awk '{print $1}')"
+
+    # Possible hack successes (heuristic): correlate ModSecurity IPs with access-log status codes
+    echo "    Possible hack successes (heuristic):"
+
+    # If access-log matches are not already present, try to pull relevant lines from the account's logs/access-logs
+    if [ -z "$ACCESS_LOG_MATCHED_LINES" ]; then
+      if [[ "$SITE_PATH" =~ ^/home/([^/]+)/public_html(/|$) ]]; then
+        acct="${BASH_REMATCH[1]}"
+        acct_domain="$(basename "$SITE_PATH")"
+        TMP_ACCESS_MATCHES=""
+        for dir in "/home/$acct/access-logs" "/home/$acct/logs"; do
+          if [ -d "$dir" ]; then
+            # Also ensure nginx system access logs are included when available
+            if [ "$dir" = "/home/$acct/logs" ]; then
+              for sysnl in "/var/log/nginx/access.log" "/var/log/nginx/access.log.1"; do
+                if [ -f "$sysnl" ]; then
+                  if grep -Iq . "$sysnl" 2>/dev/null; then
+                    if [ -n "$SUSPICIOUS_IPS" ]; then
+                      while IFS= read -r sip; do
+                        [ -z "$sip" ] && continue
+                        if [[ "$sysnl" =~ \.gz$ ]]; then
+                          TMP_ACCESS_MATCHES=$(printf "%s\n%s" "$TMP_ACCESS_MATCHES" "$(gzip -cd -- \"$sysnl\" 2>/dev/null | grep -n -F \"$sip\" || true | sed -E 's/^[0-9]+://')")
+                        else
+                          TMP_ACCESS_MATCHES=$(printf "%s\n%s" "$TMP_ACCESS_MATCHES" "$(grep -n -F \"$sip\" \"$sysnl\" 2>/dev/null | sed -E 's/^[0-9]+://')")
+                        fi
+                      done < <(printf "%s\n" "$SUSPICIOUS_IPS" | sed '/^\s*$/d' | sort -u)
+                    else
+                      printf "%s\n" "$MODSEC_MATCHED_LINES" | sed -n -E 's/.*\[uri \"([^\"]+)\"\].*/\1/p' | sed '/^\s*$/d' | while IFS= read -r uri; do
+                        if [[ "$sysnl" =~ \.gz$ ]]; then
+                          TMP_ACCESS_MATCHES=$(printf "%s\n%s" "$TMP_ACCESS_MATCHES" "$(gzip -cd -- \"$sysnl\" 2>/dev/null | grep -n -F \"$uri\" || true | sed -E 's/^[0-9]+://')")
+                        else
+                          TMP_ACCESS_MATCHES=$(printf "%s\n%s" "$TMP_ACCESS_MATCHES" "$(grep -n -F \"$uri\" \"$sysnl\" 2>/dev/null | sed -E 's/^[0-9]+://')")
+                        fi
+                      done
+                    fi
+                  fi
+                fi
+              done
+            fi
+
+            while IFS= read -r lf; do
+              [ -z "$lf" ] && continue
+              if grep -Iq . "$lf" 2>/dev/null || printf ""; then
+                if [ -n "$SUSPICIOUS_IPS" ]; then
+                  # Grep for each suspicious IP in the account logs, support gzipped logs
+                  while IFS= read -r sip; do
+                    [ -z "$sip" ] && continue
+                    if [[ "$lf" =~ \.gz$ ]]; then
+                      matches=$(gzip -cd -- "$lf" 2>/dev/null | grep -n -F "$sip" || true)
+                    else
+                      matches=$(grep -n -F "$sip" "$lf" 2>/dev/null || true)
+                    fi
+                    TMP_ACCESS_MATCHES=$(printf "%s\n%s" "$TMP_ACCESS_MATCHES" "$(printf "%s" "$matches" | sed -E 's/^[0-9]+://')")
+                  done < <(printf "%s\n" "$SUSPICIOUS_IPS" | sed '/^\s*$/d' | sort -u)
+                else
+                  # Fallback: look for URIs captured in ModSecurity matches (and ensure domain + current-month gz are checked)
+                  printf "%s\n" "$MODSEC_MATCHED_LINES" | sed -n -E 's/.*\[uri \"([^\"]+)\"\].*/\1/p' | sed '/^\s*$/d' | while IFS= read -r uri; do
+                    if [[ "$lf" =~ \.gz$ ]]; then
+                      matches=$(gzip -cd -- "$lf" 2>/dev/null | grep -n -F "$uri" || true)
+                    else
+                      matches=$(grep -n -F "$uri" "$lf" 2>/dev/null || true)
+                    fi
+                    TMP_ACCESS_MATCHES=$(printf "%s\n%s" "$TMP_ACCESS_MATCHES" "$(printf "%s" "$matches" | sed -E 's/^[0-9]+://')")
+                  done
+
+                  # Additionally, if this is the logs/ dir, check files that include the domain name and this month's gz file
+                  if [ "$(basename "$dir")" = "logs" ]; then
+                    monthpat="$(date +%Y%m)"
+                    for patfile in "$(find "$dir" -maxdepth 1 -type f -iname "*${acct_domain}*" 2>/dev/null)" "$(find "$dir" -maxdepth 1 -type f -iname "*${monthpat}*.gz" 2>/dev/null)"; do
+                      [ -z "$patfile" ] && continue
+                      if [[ "$patfile" =~ \.gz$ ]]; then
+                        matches=$(gzip -cd -- "$patfile" 2>/dev/null || true)
+                      else
+                        matches=$(cat "$patfile" 2>/dev/null || true)
+                      fi
+                      TMP_ACCESS_MATCHES=$(printf "%s\n%s" "$TMP_ACCESS_MATCHES" "$(printf "%s" "$matches" | sed -E 's/^[0-9]+://')")
+                    done
+                  fi
+                fi
+
+                # Also include any files with 'ssl' in their name under access-logs
+                if [ "$(basename "$dir")" = "access-logs" ]; then
+                  for sslf in $(find "$dir" -maxdepth 1 -type f -iname "*ssl*" 2>/dev/null); do
+                    if [[ "$sslf" =~ \.gz$ ]]; then
+                      matches=$(gzip -cd -- "$sslf" 2>/dev/null || true)
+                    else
+                      matches=$(cat "$sslf" 2>/dev/null || true)
+                    fi
+                    TMP_ACCESS_MATCHES=$(printf "%s\n%s" "$TMP_ACCESS_MATCHES" "$(printf "%s" "$matches" | sed -E 's/^[0-9]+://')")
+                  done
+                fi
+
+              fi
+            done < <(find "$dir" -maxdepth 1 -type f 2>/dev/null | head -200)
+          fi
+        done
+        if [ -n "$TMP_ACCESS_MATCHES" ]; then
+          ACCESS_LOG_MATCHED_LINES=$(printf "%s\n%s" "$ACCESS_LOG_MATCHED_LINES" "$TMP_ACCESS_MATCHES")
+        fi
+      fi
+    fi
+
+    if [ -n "$ACCESS_LOG_MATCHED_LINES" ] && [ -n "$SUSPICIOUS_IPS" ]; then
+      # For each suspicious IP, count matching access-log lines with 2xx/3xx status codes
+      printf "%s\n" "$SUSPICIOUS_IPS" | sed '/^\s*$/d' | sort -u | while IFS= read -r sip; do
+        succ=$(printf "%s\n" "$ACCESS_LOG_MATCHED_LINES" | grep -F "$sip" || true | while IFS= read -r ln; do
+          st=$(extract_http_status "${ln}")
+          case "$st" in 2??|3??) echo 1 ;; esac
+        done | wc -l)
+        if [ "$succ" -gt 0 ]; then
+          echo "      $sip => $succ requests with 2xx/3xx (may indicate successful responses)"
+        fi
+      done
+    else
+      echo "      Access logs not available to corroborate (run with --access-logs or ensure site is under /home/<user>/public_html)."
+    fi
+
+    # Highlight ModSecurity matched lines that do not explicitly contain 'Access denied' (possible bypasses)
+    BYPASS_URIS=$(printf "%s\n" "$MODSEC_MATCHED_LINES" | grep -vi "Access denied" | sed -n -E 's/.*\[uri \"([^\"]+)\"\].*/\1/p' | sed '/^\s*$/d' | sort | uniq -c | sort -nr | head -10)
+    if [ -n "$BYPASS_URIS" ]; then
+      echo "    ModSecurity lines that were not explicitly blocked (possible bypasses):"
+      printf "%s\n" "$BYPASS_URIS" | sed 's/^/      /'
+    fi
 
     # Top rule IDs (best-effort)
     if [ -n "$MODSEC_MATCHED_LINES" ]; then
@@ -1526,29 +1687,30 @@ if [ "$DO_SEO_SPAM" -eq 1 ]; then
     echo "$SEO_SPAM_FILES"
     ZIP_CANDIDATES=$(printf "%s\n%s" "$ZIP_CANDIDATES" "$SEO_SPAM_FILES")
 
-    # Cleanup instructions printed for the operator. These are manual steps to safely remove
-    # malicious language files and restore legitimate translations using WP-CLI.
     echo ""
-    echo "Cleanup guidance:"
-    echo " 1) Carefully review the listed files. If they are malicious, remove them, e.g.:"
-    echo "      sudo rm -f \"$SITE_PATH/wp-content/languages/<malicious-file>.php\""
-    echo " 2) Update or reinstall official translations via WP-CLI (recommended where available):"
-    echo "      cd \"$SITE_PATH\" && wp language core update --all --allow-root || true"
-    echo "      cd \"$SITE_PATH\" && wp language plugin update --all --allow-root || true"
-    echo "      cd \"$SITE_PATH\" && wp language theme update --all --allow-root || true"
-    echo " 3) To force reinstall a specific locale (example: de_DE) from wordpress.org:"
-    echo "      cd \"$SITE_PATH\" && wp language core install --force de_DE --allow-root || true"
-    echo " 4) Clear caches and search for injected links to verify cleanup (examples):"
-    echo "      cd \"$SITE_PATH\" && wp cache flush --allow-root || true"
-    echo "      grep -R --line-number --exclude-dir=wp-content/languages 'http[s]\?://[a-z0-9.-]*' . | head -50"
-    echo ""
-    echo "Notes:"
-    echo " - Do not blindly delete legitimate language files for other locales. Only remove files confirmed malicious."
-    echo " - If the site shows other compromises (backdoors, modified core/plugins/themes), prefer restore from a clean backup and rotate all credentials."
+    echo "See cleanup guidance below."
   else
     echo "OK: No German SEO Spam files found."
   fi
+
+  echo "If you have recently scanned and found these files then do the following steps to fully fix the SEO spam hijack (scan timestamp: 2026-09-02T14:39:33.208Z):"
+  echo " 1) Carefully review the listed files. If they are malicious, remove them, e.g.:"
+  echo "      sudo rm -f \"$SITE_PATH/wp-content/languages/<malicious-file>.php\""
+  echo " 2) Update or reinstall official translations via WP-CLI (recommended where available):"
+  echo "      cd \"$SITE_PATH\" && wp language core update --allow-root || true"
+  echo "      cd \"$SITE_PATH\" && wp language plugin update --allow-root || true"
+  echo "      cd \"$SITE_PATH\" && wp language theme update --allow-root || true"
+  echo " 3) To force reinstall a specific locale (example: de_DE) from wordpress.org:"
+  echo "      cd \"$SITE_PATH\" && wp language core install --force de_DE --allow-root || true"
+  echo " 4) Clear caches and search for injected links to verify cleanup (examples):"
+  echo "      cd \"$SITE_PATH\" && wp cache flush --allow-root || true"
+  echo "      grep -R --line-number --exclude-dir=wp-content/languages 'http[s]\?:\/\/[a-z0-9.-]*' . | head -50"
+  echo ""
+  echo "Notes:"
+  echo " - Do not blindly delete legitimate language files for other locales. Only remove files confirmed malicious."
+  echo " - If the site shows other compromises (backdoors, modified core/plugins/themes), prefer restore from a clean backup and rotate all credentials."
 fi
+
 
 # --- 6.7b. Mass-scan all /home/* accounts for SEO Spam files ---
 if [ "$DO_SEO_SPAM_MASS" -eq 1 ]; then
@@ -1603,6 +1765,75 @@ fi
 echo -e "\n=========================================================================="
 echo "Scan Complete."
 echo "=========================================================================="
+
+# Write per-module reports only for modules that were actually run
+MODULES=(recent suspicious uploads uploads-php backdoor obfuscation phpshell hidden superglobal curl wpver perms immutable verification access-logs modsec-logs dyn-exec oneliner wp-cli image-headers plugin-scan seo-spam suspicious-ips seospam mass-scan)
+for m in "${MODULES[@]}"; do
+  should_save=0
+  case "$m" in
+    recent) [ "${DO_RECENT:-0}" -eq 1 ] && should_save=1 ;;
+    suspicious) [ "${DO_SUSPICIOUS:-0}" -eq 1 ] && should_save=1 ;;
+    uploads) [ "${DO_UPLOADS:-0}" -eq 1 ] && should_save=1 ;;
+    uploads-php) [ "${DO_UPLOADS_PHP:-0}" -eq 1 ] && should_save=1 ;;
+    backdoor) [ "${DO_BACKDOOR:-0}" -eq 1 ] && should_save=1 ;;
+    obfuscation) [ "${DO_OBFUSCATED:-0}" -eq 1 ] && should_save=1 ;;
+    phpshell) [ "${DO_PHPSHELL:-0}" -eq 1 ] && should_save=1 ;;
+    hidden) [ "${DO_HIDDEN:-0}" -eq 1 ] && should_save=1 ;;
+    superglobal) [ "${DO_SUPERGLOBAL:-0}" -eq 1 ] && should_save=1 ;;
+    curl) [ "${DO_CURL:-0}" -eq 1 ] && should_save=1 ;;
+    wpver) [ "${DO_WPVER:-0}" -eq 1 ] && should_save=1 ;;
+    perms) [ "${DO_PERMS:-0}" -eq 1 ] && should_save=1 ;;
+    immutable) [ "${DO_IMMUTABLE:-0}" -eq 1 ] && should_save=1 ;;
+    verification) [ "${DO_VERIFICATION:-0}" -eq 1 ] && should_save=1 ;;
+    access-logs) [ "${DO_ACCESS_LOGS:-0}" -eq 1 ] && should_save=1 ;;
+    modsec-logs) [ "${DO_MODSEC_LOGS:-0}" -eq 1 ] && should_save=1 ;;
+    dyn-exec) [ "${DO_DYN_EXEC:-0}" -eq 1 ] && should_save=1 ;;
+    oneliner) [ "${DO_ONELINER:-0}" -eq 1 ] && should_save=1 ;;
+    wp-cli) [ "${DO_WP_CLI:-0}" -eq 1 ] && should_save=1 ;;
+    image-headers) [ "${DO_IMAGE_HEADERS:-0}" -eq 1 ] && should_save=1 ;;
+    plugin-scan) [ "${DO_PLUGIN_SCAN:-0}" -eq 1 ] && should_save=1 ;;
+    seo-spam) [ "${DO_SEO_SPAM:-0}" -eq 1 ] && should_save=1 ;;
+    suspicious-ips) [ -n "${SUSPICIOUS_IPS:-}" ] && should_save=1 ;;
+    seospam) [ "${DO_SEO_SPAM:-0}" -eq 1 ] && should_save=1 ;;
+    mass-scan) [ "${DO_SEO_SPAM_MASS:-0}" -eq 1 ] && should_save=1 ;;
+    *) should_save=0 ;;
+  esac
+
+  if [ "$should_save" -eq 1 ]; then
+    BODY=""
+    case "$m" in
+      recent) BODY="Recent files:\n${RECENT_FILES:-(none)}" ;;
+      suspicious) BODY="$(grep -n -E 'Suspicious file|Checking for suspicious' "$LOG_FILE" 2>/dev/null || true)" ;;
+      uploads) BODY="Non-month dirs in uploads:\n${FAKE_MONTH_DIRS:-(none)}" ;;
+      uploads-php) BODY="Uploads PHP files:\n${UPLOADS_PHP_FILES:-(none)}" ;;
+      backdoor) BODY="Backdoor hits (filtered):\n${FILTERED_BACKDOOR:-(none)}" ;;
+      obfuscation) BODY="Obfuscation hits (filtered):\n${FILTERED_OBFUSCATED:-(none)}" ;;
+      phpshell) BODY="PHP shell indicators:\n${PHPSHELL_UNIQUE:-(none)}" ;;
+      hidden) BODY="Hidden dotfiles:\n${HIDDEN_FILES:-(none)}" ;;
+      superglobal) BODY="Superglobal exec hits:\n${FILTERED_SUPER:-(none)}" ;;
+      curl) BODY="cURL hits (filtered):\n${FILTERED_CURL:-(none)}" ;;
+      wpver) BODY="WP Version: ${WP_VERSION:-unknown}" ;;
+      perms) BODY="World-writable files:\n${WRITABLE_FILES:-(none)}" ;;
+      immutable) BODY="Immutable files:\n${IMMUTABLE_FILES:-(none)}" ;;
+      verification) BODY="Verification files:\n${VERIFICATION_FILES:-(none)}" ;;
+      access-logs) BODY="Access log findings:\n${ACCESS_LOG_FINDINGS:-(none)}" ;;
+      modsec-logs) BODY="ModSecurity findings:\n${MODSEC_LOG_FINDINGS:-(none)}" ;;
+      dyn-exec) BODY="Dyn-exec hits (filtered):\n${FILTERED_DYN_EXEC:-(none)}" ;;
+      oneliner) BODY="One-liner hits (filtered):\n${FILTERED_ONELINER:-(none)}" ;;
+      wp-cli) BODY="WP-CLI detected plugins:\n${PLUGIN_NAMES:-(none)}" ;;
+      image-headers) BODY="Image header findings:\n${IMAGE_HEADER_FINDINGS:-(none)}" ;;
+      plugin-scan) BODY="Plugin scan notes:\n${ZIP_CANDIDATES:-(none)}" ;;
+      seo-spam) BODY="SEO spam files:\n${SEO_SPAM_FILES:-(none)}" ;;
+      suspicious-ips) BODY="Suspicious IPs:\n$(printf '%s\n' "${SUSPICIOUS_IPS:-(none)}")" ;;
+      seospam) BODY="SEO spam module run." ;;
+      mass-scan) BODY="SEO spam mass scan output saved to /root/seospamscan.txt if run." ;;
+      *) BODY="Module $m ran; see log: $LOG_FILE" ;;
+    esac
+
+    save_report "$m" "$BODY"
+  fi
+done
+
 echo "Disclaimer: This script is a powerful scanning aid. It may produce false"
 echo "positives. All findings should be manually investigated and verified."
 echo "=========================================================================="
@@ -1711,6 +1942,8 @@ if [ -n "$SUSPICIOUS_IPS" ]; then
   if printf "%s\n" "$SUSPICIOUS_IPS" | sed '/^$/d' | sort -u > "$SUSPICIOUS_IPS_FILE" 2>/dev/null; then
     echo "Suspicious IPs have been saved to: $SUSPICIOUS_IPS_FILE"
     echo ""
+    # Save suspicious IPs report
+    save_report "suspicious-ips" "Total unique suspicious IPs: $TOTAL_UNIQUE\n\nIP Address | Request Count\n$UNIQUE_IPS"
   fi
 fi
 
