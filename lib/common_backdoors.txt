@@ -1,0 +1,25 @@
+# Common backdoor filenames and simple signature patterns (one per line)
+# Filenames / simple identifiers
+wso\.php
+c99\.php
+r57\.php
+b374k\.php
+webshell\.php
+adminer\.php
+phpmyadmin\.php
+enmnnu\.php
+shell\.php
+filesman\.php
+# Code-level signatures (regex)
+base64_decode
+gzinflate
+gzuncompress
+eval\(
+assert\(
+system\(
+shell_exec\(
+passthru\(
+preg_replace.*\/e
+php_uname
+posix_geteuid
+# end of list
